@@ -1,0 +1,18 @@
+[package]
+name = "typed-store"
+version = "0.1.0"
+license = "Apache-2.0"
+authors = ["Francois Garillot <francois@mystenlabs.com>"]
+description = "a typed database interface"
+repository = "https://github.com/mystenlabs/mysten-infra"
+edition = "2018"
+
+[dependencies]
+rocksdb = "0.17.0"
+eyre = "0.6.5"
+serde = "1.0.132"
+bincode = "1.3.3"
+tokio = { version = "1.15.0", features = ["sync", "macros", "rt"] }
+
+[dev-dependencies]
+tempfile = "3.2.0"
