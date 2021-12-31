@@ -4,14 +4,16 @@ use std::marker::PhantomData;
 
 use serde::de::DeserializeOwned;
 
+use super::DBRawIteratorMultiThreaded;
+
 /// An iterator over the values of a prefix.
 pub struct Values<'a, V> {
-    db_iter: rocksdb::DBRawIterator<'a>,
+    db_iter: DBRawIteratorMultiThreaded<'a>,
     _phantom: PhantomData<V>,
 }
 
 impl<'a, V: DeserializeOwned> Values<'a, V> {
-    pub(crate) fn new(db_iter: rocksdb::DBRawIterator<'a>) -> Self {
+    pub(crate) fn new(db_iter: DBRawIteratorMultiThreaded<'a>) -> Self {
         Self {
             db_iter,
             _phantom: PhantomData,

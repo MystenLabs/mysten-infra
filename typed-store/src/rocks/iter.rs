@@ -6,14 +6,16 @@ use bincode::Options;
 
 use serde::de::DeserializeOwned;
 
+use super::DBRawIteratorMultiThreaded;
+
 /// An iterator over all key-value pairs in a data map.
 pub struct Iter<'a, K, V> {
-    db_iter: rocksdb::DBRawIterator<'a>,
+    db_iter: DBRawIteratorMultiThreaded<'a>,
     _phantom: PhantomData<(K, V)>,
 }
 
 impl<'a, K: DeserializeOwned, V: DeserializeOwned> Iter<'a, K, V> {
-    pub(super) fn new(db_iter: rocksdb::DBRawIterator<'a>) -> Self {
+    pub(super) fn new(db_iter: DBRawIteratorMultiThreaded<'a>) -> Self {
         Self {
             db_iter,
             _phantom: PhantomData,
