@@ -7,7 +7,7 @@ mod values;
 use crate::traits::Map;
 use bincode::Options;
 use eyre::{eyre, Result};
-use rocksdb::WriteBatch;
+use rocksdb::{DBWithThreadMode, MultiThreaded, WriteBatch};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{marker::PhantomData, path::Path, sync::Arc};
 
@@ -16,10 +16,13 @@ use self::{iter::Iter, keys::Keys, values::Values};
 #[cfg(test)]
 mod tests;
 
+type DBRawIteratorMultiThreaded<'a> =
+    rocksdb::DBRawIteratorWithThreadMode<'a, DBWithThreadMode<MultiThreaded>>;
+
 /// An interface to a rocksDB database, keyed by a columnfamily
 #[derive(Clone, Debug)]
 pub struct DBMap<K, V> {
-    pub rocksdb: Arc<rocksdb::DB>,
+    pub rocksdb: Arc<rocksdb::DBWithThreadMode<MultiThreaded>>,
     _phantom: PhantomData<fn(K) -> V>,
     // the rocksDB ColumnFamily under which the map is stored
     cf: String,
@@ -60,7 +63,10 @@ impl<K, V> DBMap<K, V> {
     ///    let db_cf_1 = DBMap::<u32,u32>::reopen(&rocks, Some("First_CF")).expect("Failed to open storage");
     ///    let db_cf_2 = DBMap::<u32,u32>::reopen(&rocks, Some("Second_CF")).expect("Failed to open storage");
     /// ```
-    pub fn reopen(db: &Arc<rocksdb::DB>, opt_cf: Option<&str>) -> Result<Self> {
+    pub fn reopen(
+        db: &Arc<rocksdb::DBWithThreadMode<MultiThreaded>>,
+        opt_cf: Option<&str>,
+    ) -> Result<Self> {
         let cf_key = opt_cf
             .unwrap_or(rocksdb::DEFAULT_COLUMN_FAMILY_NAME)
             .to_owned();
@@ -78,10 +84,8 @@ impl<K, V> DBMap<K, V> {
     pub fn batch(&self) -> DBBatch {
         DBBatch::new(&self.rocksdb)
     }
-}
 
-impl<K, V> AsRef<rocksdb::ColumnFamily> for DBMap<K, V> {
-    fn as_ref(&self) -> &rocksdb::ColumnFamily {
+    fn cf(&self) -> Arc<rocksdb::BoundColumnFamily<'_>> {
         self.rocksdb
             .cf_handle(&self.cf)
             .expect("Map-keying column family should have been checked at DB creation")
@@ -131,7 +135,7 @@ impl<K, V> AsRef<rocksdb::ColumnFamily> for DBMap<K, V> {
 /// ```
 ///
 pub struct DBBatch {
-    rocksdb: Arc<rocksdb::DB>,
+    rocksdb: Arc<rocksdb::DBWithThreadMode<MultiThreaded>>,
     batch: WriteBatch,
 }
 
@@ -139,7 +143,7 @@ impl DBBatch {
     /// Create a new batch associated with a DB reference.
     ///
     /// Use `open_cf` to get the DB reference or an existing open database.
-    pub fn new(dbref: &Arc<rocksdb::DB>) -> Self {
+    pub fn new(dbref: &Arc<rocksdb::DBWithThreadMode<MultiThreaded>>) -> Self {
         DBBatch {
             rocksdb: dbref.clone(),
             batch: WriteBatch::default(),
@@ -171,7 +175,7 @@ impl DBBatch {
         purged_vals
             .map(|k| {
                 let k_buf = config.serialize(&k)?;
-                self.batch.delete_cf(db.as_ref(), k_buf);
+                self.batch.delete_cf(&db.cf(), k_buf);
 
                 Ok(())
             })
@@ -196,7 +200,7 @@ impl DBBatch {
         let from_buf = config.serialize(from)?;
         let to_buf = config.serialize(to)?;
 
-        self.batch.delete_range_cf(db.as_ref(), from_buf, to_buf);
+        self.batch.delete_range_cf(&db.cf(), from_buf, to_buf);
         Ok(self)
     }
 }
@@ -220,7 +224,7 @@ impl DBBatch {
             .map(|(ref k, ref v)| {
                 let k_buf = config.serialize(k)?;
                 let v_buf = bincode::serialize(v)?;
-                self.batch.put_cf(db.as_ref(), k_buf, v_buf);
+                self.batch.put_cf(&db.cf(), k_buf, v_buf);
                 Ok(())
             })
             .collect::<Result<_, eyre::Error>>()?;
@@ -247,7 +251,7 @@ where
             .with_fixint_encoding();
 
         let key_buf = config.serialize(key)?;
-        let res = self.rocksdb.get_pinned_cf(self.as_ref(), &key_buf)?;
+        let res = self.rocksdb.get_pinned_cf(&self.cf(), &key_buf)?;
         match res {
             Some(data) => Ok(Some(bincode::deserialize(&data)?)),
             None => Ok(None),
@@ -262,7 +266,7 @@ where
         let key_buf = config.serialize(key)?;
         let value_buf = bincode::serialize(value)?;
 
-        let _ = self.rocksdb.put_cf(self.as_ref(), &key_buf, &value_buf)?;
+        let _ = self.rocksdb.put_cf(&self.cf(), &key_buf, &value_buf)?;
         Ok(())
     }
 
@@ -272,26 +276,26 @@ where
             .with_fixint_encoding();
         let key_buf = config.serialize(key)?;
 
-        let _ = self.rocksdb.delete_cf(self.as_ref(), &key_buf)?;
+        let _ = self.rocksdb.delete_cf(&self.cf(), &key_buf)?;
         Ok(())
     }
 
     fn iter(&'a self) -> Self::Iterator {
-        let mut db_iter = self.rocksdb.raw_iterator_cf(self.as_ref());
+        let mut db_iter = self.rocksdb.raw_iterator_cf(&self.cf());
         db_iter.seek_to_first();
 
         Iter::new(db_iter)
     }
 
     fn keys(&'a self) -> Self::Keys {
-        let mut db_iter = self.rocksdb.raw_iterator_cf(self.as_ref());
+        let mut db_iter = self.rocksdb.raw_iterator_cf(&self.cf());
         db_iter.seek_to_first();
 
         Keys::new(db_iter)
     }
 
     fn values(&'a self) -> Self::Values {
-        let mut db_iter = self.rocksdb.raw_iterator_cf(self.as_ref());
+        let mut db_iter = self.rocksdb.raw_iterator_cf(&self.cf());
         db_iter.seek_to_first();
 
         Values::new(db_iter)
@@ -303,10 +307,10 @@ pub fn open_cf<P: AsRef<Path>>(
     path: P,
     db_options: Option<rocksdb::Options>,
     opt_cfs: &[&str],
-) -> Result<Arc<rocksdb::DB>> {
+) -> Result<Arc<rocksdb::DBWithThreadMode<MultiThreaded>>> {
     // Customize database options
     let mut options = db_options.unwrap_or_default();
-    let mut cfs = rocksdb::DB::list_cf(&options, &path)
+    let mut cfs = rocksdb::DBWithThreadMode::<MultiThreaded>::list_cf(&options, &path)
         .ok()
         .unwrap_or_default();
 
@@ -324,7 +328,9 @@ pub fn open_cf<P: AsRef<Path>>(
     let rocksdb = {
         options.create_if_missing(true);
         options.create_missing_column_families(true);
-        Arc::new(rocksdb::DB::open_cf(&options, &primary, &cfs)?)
+        Arc::new(rocksdb::DBWithThreadMode::<MultiThreaded>::open_cf(
+            &options, &primary, &cfs,
+        )?)
     };
     Ok(rocksdb)
 }
