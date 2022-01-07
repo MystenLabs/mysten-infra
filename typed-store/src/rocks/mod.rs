@@ -300,6 +300,35 @@ where
 
         Values::new(db_iter)
     }
+
+    /// Returns a vector of values corresponding to the keys provided.
+    fn multi_get(&self, keys: &[K]) -> Result<Vec<Option<V>>> {
+        let config = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
+
+        let mut keys_bytes = Vec::with_capacity(keys.len());
+        for k in keys.iter() {
+            let serialized_key = config.serialize(k)?;
+            // fallible call makes use of iterator hard
+            keys_bytes.push((self.cf(), serialized_key));
+        }
+
+        let results = self
+            .rocksdb
+            .multi_get_cf(keys_bytes.iter().map(|(cf, k)| (cf, k)));
+
+        let mut values_parsed = Vec::with_capacity(keys.len());
+        for value_byte in results {
+            // fallible call makes use of iterator hard
+            values_parsed.push(match value_byte? {
+                Some(data) => Some(bincode::deserialize(&data)?),
+                None => None,
+            });
+        }
+
+        Ok(values_parsed)
+    }
 }
 
 /// Opens a database with options, and a number of column families that are created if they do not exist.

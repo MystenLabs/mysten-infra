@@ -44,4 +44,7 @@ where
 
     /// Returns an iterator over each value in the map.
     fn values(&'a self) -> Self::Values;
+
+    /// Returns a vector of values corresponding to the keys provided.
+    fn multi_get(&self, keys: &[K]) -> Result<Vec<Option<V>>>;
 }

@@ -4,7 +4,8 @@ use std::marker::PhantomData;
 
 use bincode::Options;
 
-use serde::de::DeserializeOwned;
+use eyre::Result;
+use serde::{de::DeserializeOwned, Serialize};
 
 use super::DBRawIteratorMultiThreaded;
 
@@ -42,5 +43,15 @@ impl<'a, K: DeserializeOwned, V: DeserializeOwned> Iterator for Iter<'a, K, V> {
         } else {
             None
         }
+    }
+}
+
+impl<'a, K: Serialize, V> Iter<'a, K, V> {
+    pub fn seek(mut self, key: &K) -> Result<Self> {
+        let config = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
+        self.db_iter.seek(config.serialize(key)?);
+        Ok(self)
     }
 }

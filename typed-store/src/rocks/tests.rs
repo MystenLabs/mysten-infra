@@ -63,6 +63,41 @@ fn test_get() {
 }
 
 #[test]
+fn test_multi_get() {
+    let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+
+    db.insert(&123, &"123".to_string())
+        .expect("Failed to insert");
+    db.insert(&456, &"456".to_string())
+        .expect("Failed to insert");
+
+    let result = db.multi_get(&[123, 456, 789]).expect("Failed to multi get");
+
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0], Some("123".to_string()));
+    assert_eq!(result[1], Some("456".to_string()));
+    assert_eq!(result[2], None);
+}
+
+#[test]
+fn test_seek() {
+    let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+
+    db.insert(&123, &"123".to_string())
+        .expect("Failed to insert");
+    db.insert(&456, &"456".to_string())
+        .expect("Failed to insert");
+    db.insert(&789, &"789".to_string())
+        .expect("Failed to insert");
+
+    let key_vals: Vec<_> = db.iter().seek(&456).expect("Seek failed").collect();
+
+    assert_eq!(key_vals.len(), 2);
+    assert_eq!(key_vals[0], (456, "456".to_string()));
+    assert_eq!(key_vals[1], (789, "789".to_string()));
+}
+
+#[test]
 fn test_remove() {
     let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
 
