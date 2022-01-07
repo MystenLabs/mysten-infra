@@ -63,6 +63,99 @@ fn test_get() {
 }
 
 #[test]
+fn test_multi_get() {
+    let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+
+    db.insert(&123, &"123".to_string())
+        .expect("Failed to insert");
+    db.insert(&456, &"456".to_string())
+        .expect("Failed to insert");
+
+    let result = db.multi_get(&[123, 456, 789]).expect("Failed to multi get");
+
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0], Some("123".to_string()));
+    assert_eq!(result[1], Some("456".to_string()));
+    assert_eq!(result[2], None);
+}
+
+#[test]
+fn test_skip() {
+    let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+
+    db.insert(&123, &"123".to_string())
+        .expect("Failed to insert");
+    db.insert(&456, &"456".to_string())
+        .expect("Failed to insert");
+    db.insert(&789, &"789".to_string())
+        .expect("Failed to insert");
+
+    // Skip all smaller
+    let key_vals: Vec<_> = db.iter().skip_to(&456).expect("Seek failed").collect();
+    assert_eq!(key_vals.len(), 2);
+    assert_eq!(key_vals[0], (456, "456".to_string()));
+    assert_eq!(key_vals[1], (789, "789".to_string()));
+
+    // Skip to the end
+    let key_vals: Vec<_> = db.iter().skip_to(&999).expect("Seek failed").collect();
+    assert_eq!(key_vals.len(), 0);
+
+    // Skip to successor of first value
+    let key_vals: Vec<_> = db.iter().skip_to(&000).expect("Skip failed").collect();
+    assert_eq!(key_vals.len(), 3);
+}
+
+#[test]
+fn test_skip_to_previous_simple() {
+    let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+
+    db.insert(&123, &"123".to_string())
+        .expect("Failed to insert");
+    db.insert(&456, &"456".to_string())
+        .expect("Failed to insert");
+    db.insert(&789, &"789".to_string())
+        .expect("Failed to insert");
+
+    // Skip to the one before the end
+    let key_vals: Vec<_> = db
+        .iter()
+        .skip_prior_to(&999)
+        .expect("Seek failed")
+        .collect();
+    assert_eq!(key_vals.len(), 1);
+    assert_eq!(key_vals[0], (789, "789".to_string()));
+
+    // Skip to prior of first value
+    // Note: returns an empty iterator!
+    let key_vals: Vec<_> = db
+        .iter()
+        .skip_prior_to(&000)
+        .expect("Seek failed")
+        .collect();
+    assert_eq!(key_vals.len(), 0);
+}
+
+#[test]
+fn test_iter_skip_to_previous_gap() {
+    let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+    for i in 1..100 {
+        if i != 50 {
+            db.insert(&i, &i.to_string()).unwrap();
+        }
+    }
+
+    let db_iter = db.iter().skip_prior_to(&50).unwrap();
+
+    assert_eq!(
+        (49..50)
+            .chain(51..100)
+            .map(|i| (i, i.to_string()))
+            .collect::<Vec<_>>(),
+        db_iter.collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_remove() {
     let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
 

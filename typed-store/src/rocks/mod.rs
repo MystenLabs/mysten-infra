@@ -300,6 +300,32 @@ where
 
         Values::new(db_iter)
     }
+
+    /// Returns a vector of values corresponding to the keys provided.
+    fn multi_get(&self, keys: &[K]) -> Result<Vec<Option<V>>> {
+        let config = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
+
+        let cf = self.cf();
+
+        let keys_bytes: Result<Vec<_>> = keys
+            .iter()
+            .map(|k| Ok((&cf, config.serialize(k)?)))
+            .collect();
+
+        let results = self.rocksdb.multi_get_cf(keys_bytes?);
+
+        let values_parsed: Result<Vec<_>> = results
+            .into_iter()
+            .map(|value_byte| match value_byte? {
+                Some(data) => Ok(Some(bincode::deserialize(&data)?)),
+                None => Ok(None),
+            })
+            .collect();
+
+        values_parsed
+    }
 }
 
 /// Opens a database with options, and a number of column families that are created if they do not exist.
