@@ -307,27 +307,24 @@ where
             .with_big_endian()
             .with_fixint_encoding();
 
-        let mut keys_bytes = Vec::with_capacity(keys.len());
-        for k in keys.iter() {
-            let serialized_key = config.serialize(k)?;
-            // fallible call makes use of iterator hard
-            keys_bytes.push((self.cf(), serialized_key));
-        }
+        let cf = self.cf();
 
-        let results = self
-            .rocksdb
-            .multi_get_cf(keys_bytes.iter().map(|(cf, k)| (cf, k)));
+        let keys_bytes: Result<Vec<_>> = keys
+            .iter()
+            .map(|k| Ok((&cf, config.serialize(k)?)))
+            .collect();
 
-        let mut values_parsed = Vec::with_capacity(keys.len());
-        for value_byte in results {
-            // fallible call makes use of iterator hard
-            values_parsed.push(match value_byte? {
-                Some(data) => Some(bincode::deserialize(&data)?),
-                None => None,
-            });
-        }
+        let results = self.rocksdb.multi_get_cf(keys_bytes?);
 
-        Ok(values_parsed)
+        let values_parsed: Result<Vec<_>> = results
+            .into_iter()
+            .map(|value_byte| match value_byte? {
+                Some(data) => Ok(Some(bincode::deserialize(&data)?)),
+                None => Ok(None),
+            })
+            .collect();
+
+        values_parsed
     }
 }
 

@@ -47,11 +47,25 @@ impl<'a, K: DeserializeOwned, V: DeserializeOwned> Iterator for Iter<'a, K, V> {
 }
 
 impl<'a, K: Serialize, V> Iter<'a, K, V> {
-    pub fn seek(mut self, key: &K) -> Result<Self> {
+    /// Skips all the elements that are smaller than the given key,
+    /// and either lands on the key or the first one greater than
+    /// the key.
+    pub fn skip_to(mut self, key: &K) -> Result<Self> {
         let config = bincode::DefaultOptions::new()
             .with_big_endian()
             .with_fixint_encoding();
         self.db_iter.seek(config.serialize(key)?);
+        Ok(self)
+    }
+
+    /// Moves the iterator the element given or
+    /// the one prior to it if it does not exist. If there is
+    /// no element prior to it, it returns an empty iterator.
+    pub fn skip_prior_to(mut self, key: &K) -> Result<Self> {
+        let config = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
+        self.db_iter.seek_for_prev(config.serialize(key)?);
         Ok(self)
     }
 }
