@@ -97,12 +97,11 @@ fn test_skip() {
     assert_eq!(key_vals[1], (789, "789".to_string()));
 
     // Skip to the end
-    let key_vals: Vec<_> = db.iter().skip_to(&999).expect("Seek failed").collect();
-    assert_eq!(key_vals.len(), 0);
+
+    assert_eq!(db.iter().skip_to(&999).expect("Seek failed").count(), 0);
 
     // Skip to successor of first value
-    let key_vals: Vec<_> = db.iter().skip_to(&000).expect("Skip failed").collect();
-    assert_eq!(key_vals.len(), 3);
+    assert_eq!(db.iter().skip_to(&000).expect("Skip failed").count(), 3);
 }
 
 #[test]
@@ -127,12 +126,10 @@ fn test_skip_to_previous_simple() {
 
     // Skip to prior of first value
     // Note: returns an empty iterator!
-    let key_vals: Vec<_> = db
-        .iter()
-        .skip_prior_to(&000)
-        .expect("Seek failed")
-        .collect();
-    assert_eq!(key_vals.len(), 0);
+    assert_eq!(
+        db.iter().skip_prior_to(&000).expect("Seek failed").count(),
+        0
+    );
 }
 
 #[test]
