@@ -1,0 +1,15 @@
+[package]
+name = "rccheck"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rustls = { version = "0.20.2", default-features = false, features = ["logging", "dangerous_configuration"] }
+tracing = "0.1.29"
+webpki = { version = "0.22.0", features = ["alloc", "std"] }
+x509-parser = "0.12.0"
+
+[dev-dependencies]
+rcgen = "0.8.14"
