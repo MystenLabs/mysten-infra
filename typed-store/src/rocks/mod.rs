@@ -1,17 +1,18 @@
 // Copyright(C) 2021, Mysten Labs
 // SPDX-License-Identifier: Apache-2.0
+mod errors;
 mod iter;
 mod keys;
 mod values;
 
 use crate::traits::Map;
 use bincode::Options;
-use eyre::{eyre, Result};
 use rocksdb::{DBWithThreadMode, MultiThreaded, WriteBatch};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{marker::PhantomData, path::Path, sync::Arc};
 
 use self::{iter::Iter, keys::Keys, values::Values};
+pub use errors::TypedStoreError;
 
 #[cfg(test)]
 mod tests;
@@ -39,7 +40,7 @@ impl<K, V> DBMap<K, V> {
         path: P,
         db_options: Option<rocksdb::Options>,
         opt_cf: Option<&str>,
-    ) -> Result<Self> {
+    ) -> Result<Self, TypedStoreError> {
         let cf_key = opt_cf.unwrap_or(rocksdb::DEFAULT_COLUMN_FAMILY_NAME);
         let cfs = vec![cf_key];
         let rocksdb = open_cf(path, db_options, &cfs)?;
@@ -66,13 +67,13 @@ impl<K, V> DBMap<K, V> {
     pub fn reopen(
         db: &Arc<rocksdb::DBWithThreadMode<MultiThreaded>>,
         opt_cf: Option<&str>,
-    ) -> Result<Self> {
+    ) -> Result<Self, TypedStoreError> {
         let cf_key = opt_cf
             .unwrap_or(rocksdb::DEFAULT_COLUMN_FAMILY_NAME)
             .to_owned();
 
         db.cf_handle(&cf_key)
-            .ok_or_else(|| eyre!("required columnfamily is not registered in the database"))?;
+            .ok_or_else(|| TypedStoreError::UnregisteredColumn(cf_key.clone()))?;
 
         Ok(DBMap {
             rocksdb: db.clone(),
@@ -151,7 +152,7 @@ impl DBBatch {
     }
 
     /// Consume the batch and write its operations to the database
-    pub fn write(self) -> Result<()> {
+    pub fn write(self) -> Result<(), TypedStoreError> {
         self.rocksdb.write(self.batch)?;
         Ok(())
     }
@@ -164,9 +165,9 @@ impl DBBatch {
         mut self,
         db: &DBMap<K, V>,
         purged_vals: T,
-    ) -> Result<Self> {
+    ) -> Result<Self, TypedStoreError> {
         if !Arc::ptr_eq(&db.rocksdb, &self.rocksdb) {
-            return Err(eyre!("a batch can't operate over two distinct databases"));
+            return Err(TypedStoreError::CrossDBBatch);
         }
 
         let config = bincode::DefaultOptions::new()
@@ -179,7 +180,7 @@ impl DBBatch {
 
                 Ok(())
             })
-            .collect::<Result<_, eyre::Error>>()?;
+            .collect::<Result<_, TypedStoreError>>()?;
         Ok(self)
     }
 
@@ -189,9 +190,9 @@ impl DBBatch {
         db: &'a DBMap<K, V>,
         from: &K,
         to: &K,
-    ) -> Result<Self> {
+    ) -> Result<Self, TypedStoreError> {
         if !Arc::ptr_eq(&db.rocksdb, &self.rocksdb) {
-            return Err(eyre!("a batch can't operate over two distinct databases"));
+            return Err(TypedStoreError::CrossDBBatch);
         }
 
         let config = bincode::DefaultOptions::new()
@@ -212,9 +213,9 @@ impl DBBatch {
         mut self,
         db: &DBMap<K, V>,
         new_vals: T,
-    ) -> Result<Self> {
+    ) -> Result<Self, TypedStoreError> {
         if !Arc::ptr_eq(&db.rocksdb, &self.rocksdb) {
-            return Err(eyre!("a batch can't operate over two distinct databases"));
+            return Err(TypedStoreError::CrossDBBatch);
         }
 
         let config = bincode::DefaultOptions::new()
@@ -227,7 +228,7 @@ impl DBBatch {
                 self.batch.put_cf(&db.cf(), k_buf, v_buf);
                 Ok(())
             })
-            .collect::<Result<_, eyre::Error>>()?;
+            .collect::<Result<_, TypedStoreError>>()?;
         Ok(self)
     }
 }
@@ -237,15 +238,16 @@ where
     K: Serialize + DeserializeOwned,
     V: Serialize + DeserializeOwned,
 {
+    type Error = TypedStoreError;
     type Iterator = Iter<'a, K, V>;
     type Keys = Keys<'a, K>;
     type Values = Values<'a, V>;
 
-    fn contains_key(&self, key: &K) -> Result<bool> {
+    fn contains_key(&self, key: &K) -> Result<bool, TypedStoreError> {
         self.get(key).map(|v| v.is_some())
     }
 
-    fn get(&self, key: &K) -> Result<Option<V>> {
+    fn get(&self, key: &K) -> Result<Option<V>, TypedStoreError> {
         let config = bincode::DefaultOptions::new()
             .with_big_endian()
             .with_fixint_encoding();
@@ -258,7 +260,7 @@ where
         }
     }
 
-    fn insert(&self, key: &K, value: &V) -> Result<()> {
+    fn insert(&self, key: &K, value: &V) -> Result<(), TypedStoreError> {
         let config = bincode::DefaultOptions::new()
             .with_big_endian()
             .with_fixint_encoding();
@@ -270,7 +272,7 @@ where
         Ok(())
     }
 
-    fn remove(&self, key: &K) -> Result<()> {
+    fn remove(&self, key: &K) -> Result<(), TypedStoreError> {
         let config = bincode::DefaultOptions::new()
             .with_big_endian()
             .with_fixint_encoding();
@@ -302,21 +304,21 @@ where
     }
 
     /// Returns a vector of values corresponding to the keys provided.
-    fn multi_get(&self, keys: &[K]) -> Result<Vec<Option<V>>> {
+    fn multi_get(&self, keys: &[K]) -> Result<Vec<Option<V>>, TypedStoreError> {
         let config = bincode::DefaultOptions::new()
             .with_big_endian()
             .with_fixint_encoding();
 
         let cf = self.cf();
 
-        let keys_bytes: Result<Vec<_>> = keys
+        let keys_bytes: Result<Vec<_>, TypedStoreError> = keys
             .iter()
             .map(|k| Ok((&cf, config.serialize(k)?)))
             .collect();
 
         let results = self.rocksdb.multi_get_cf(keys_bytes?);
 
-        let values_parsed: Result<Vec<_>> = results
+        let values_parsed: Result<Vec<_>, TypedStoreError> = results
             .into_iter()
             .map(|value_byte| match value_byte? {
                 Some(data) => Ok(Some(bincode::deserialize(&data)?)),
@@ -333,7 +335,7 @@ pub fn open_cf<P: AsRef<Path>>(
     path: P,
     db_options: Option<rocksdb::Options>,
     opt_cfs: &[&str],
-) -> Result<Arc<rocksdb::DBWithThreadMode<MultiThreaded>>> {
+) -> Result<Arc<rocksdb::DBWithThreadMode<MultiThreaded>>, TypedStoreError> {
     // Customize database options
     let mut options = db_options.unwrap_or_default();
     let mut cfs = rocksdb::DBWithThreadMode::<MultiThreaded>::list_cf(&options, &path)
