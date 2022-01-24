@@ -11,10 +11,10 @@ use thiserror::Error;
 #[non_exhaustive]
 #[derive(Error, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 pub enum TypedStoreError {
-    #[error("rocksdb error")]
-    RocksDBError(#[from] RocksErrorDef),
-    #[error("(de)serialization error")]
-    SerializationError(#[from] BincodeErrorDef),
+    #[error("rocksdb error: {0}")]
+    RocksDBError(String),
+    #[error("(de)serialization error: {0}")]
+    SerializationError(String),
     #[error("the column family {0} was not registered with the database")]
     UnregisteredColumn(String),
     #[error("a batch operation can't operate across databases")]
@@ -22,7 +22,7 @@ pub enum TypedStoreError {
 }
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, Error)]
-pub struct RocksErrorDef {
+pub(crate) struct RocksErrorDef {
     message: String,
 }
 
@@ -36,7 +36,7 @@ impl From<RocksError> for RocksErrorDef {
 
 impl From<RocksError> for TypedStoreError {
     fn from(err: RocksError) -> Self {
-        TypedStoreError::RocksDBError(err.into())
+        TypedStoreError::RocksDBError(format!("{}", err))
     }
 }
 
@@ -47,7 +47,7 @@ impl Display for RocksErrorDef {
 }
 
 #[derive(Serialize, Deserialize, Clone, Hash, Eq, PartialEq, Debug, Error)]
-pub enum BincodeErrorDef {
+pub(crate) enum BincodeErrorDef {
     Io(String),
     InvalidUtf8Encoding(String),
     InvalidBoolEncoding(u8),
@@ -108,6 +108,6 @@ impl From<bincode::Error> for BincodeErrorDef {
 
 impl From<bincode::Error> for TypedStoreError {
     fn from(err: bincode::Error) -> Self {
-        TypedStoreError::SerializationError(err.into())
+        TypedStoreError::SerializationError(format!("{}", err))
     }
 }
