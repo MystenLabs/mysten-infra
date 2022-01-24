@@ -27,7 +27,7 @@ pub mod rocks;
 #[path = "tests/store_tests.rs"]
 pub mod store_tests;
 
-pub type StoreError = eyre::Error;
+pub type StoreError = rocks::TypedStoreError;
 type StoreResult<T> = Result<T, StoreError>;
 
 pub enum StoreCommand<Key, Value> {

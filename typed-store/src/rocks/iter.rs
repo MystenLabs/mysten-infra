@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 
 use bincode::Options;
 
-use eyre::Result;
+use super::errors::TypedStoreError;
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::DBRawIteratorMultiThreaded;
@@ -50,7 +50,7 @@ impl<'a, K: Serialize, V> Iter<'a, K, V> {
     /// Skips all the elements that are smaller than the given key,
     /// and either lands on the key or the first one greater than
     /// the key.
-    pub fn skip_to(mut self, key: &K) -> Result<Self> {
+    pub fn skip_to(mut self, key: &K) -> Result<Self, TypedStoreError> {
         let config = bincode::DefaultOptions::new()
             .with_big_endian()
             .with_fixint_encoding();
@@ -61,7 +61,7 @@ impl<'a, K: Serialize, V> Iter<'a, K, V> {
     /// Moves the iterator the element given or
     /// the one prior to it if it does not exist. If there is
     /// no element prior to it, it returns an empty iterator.
-    pub fn skip_prior_to(mut self, key: &K) -> Result<Self> {
+    pub fn skip_prior_to(mut self, key: &K) -> Result<Self, TypedStoreError> {
         let config = bincode::DefaultOptions::new()
             .with_big_endian()
             .with_fixint_encoding();
