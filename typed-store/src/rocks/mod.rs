@@ -282,6 +282,27 @@ where
         Ok(())
     }
 
+    fn clear(&self) -> Result<(), TypedStoreError> {
+        let config = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
+        let num_items = self.iter().count();
+        if num_items == 0 {
+            return Ok(());
+        }
+        let end = config.serialize(&self.iter().last().unwrap().0)?;
+        if num_items > 1 {
+            let start = config.serialize(&self.iter().next().unwrap().0)?;
+            // This deletes all but the last elem
+            let _ = self
+                .rocksdb
+                .delete_range_cf(&self.cf(), start, end.clone())?;
+        }
+        // Finally delete the last elem
+        let _ = self.rocksdb.delete(end)?;
+        Ok(())
+    }
+
     fn iter(&'a self) -> Self::Iterator {
         let mut db_iter = self.rocksdb.raw_iterator_cf(&self.cf());
         db_iter.seek_to_first();

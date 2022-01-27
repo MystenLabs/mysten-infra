@@ -313,3 +313,31 @@ fn test_delete_range() {
     // range operator is not inclusive of to
     assert!(db.contains_key(&100).expect("Failed to query legel key"));
 }
+
+#[test]
+fn test_clear() {
+    let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+    // Test clear of empty map
+    let _ = db.clear();
+
+    let keys_vals = (0..101).map(|i| (i, i.to_string()));
+    let insert_batch = db
+        .batch()
+        .insert_batch(&db, keys_vals)
+        .expect("Failed to batch insert");
+
+    let _ = insert_batch.write().expect("Failed to execute batch");
+
+    // Check we have multiple entries
+    assert!(db.iter().count() > 1);
+    let _ = db.clear();
+    assert_eq!(db.iter().count(), 0);
+    // Clear again to ensue safety when clearing empty map
+    let _ = db.clear();
+    assert_eq!(db.iter().count(), 0);
+    // Clear with one item
+    let _ = db.insert(&1, &"e".to_string());
+    assert_eq!(db.iter().count(), 1);
+    let _ = db.clear();
+    assert_eq!(db.iter().count(), 0);
+}
