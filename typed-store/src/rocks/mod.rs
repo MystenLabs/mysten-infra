@@ -205,9 +205,7 @@ impl DBBatch {
         self.batch.delete_range_cf(&db.cf(), from_buf, to_buf);
         Ok(self)
     }
-}
 
-impl DBBatch {
     /// inserts a range of (key, value) pairs given as an iterator
     #[allow(clippy::map_collect_result_unit)] // we don't want a mutable argument
     pub fn insert_batch<K: Serialize, V: Serialize>(
