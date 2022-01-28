@@ -201,6 +201,19 @@ fn test_values() {
 }
 
 #[test]
+fn test_try_extend() {
+    let mut db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+    let mut keys_vals = (1..100).map(|i| (i, i.to_string()));
+
+    db.try_extend(&mut keys_vals)
+        .expect("Failed to extend the DB with (k, v) pairs");
+    for (k, v) in keys_vals {
+        let val = db.get(&k).expect("Failed to get inserted key");
+        assert_eq!(Some(v), val);
+    }
+}
+
+#[test]
 fn test_insert_batch() {
     let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
     let keys_vals = (1..100).map(|i| (i, i.to_string()));

@@ -7,6 +7,7 @@ mod values;
 
 use crate::traits::Map;
 use bincode::Options;
+use collectable::TryExtend;
 use rocksdb::{DBWithThreadMode, MultiThreaded, WriteBatch};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{borrow::Borrow, marker::PhantomData, path::Path, sync::Arc};
@@ -330,6 +331,30 @@ where
             .collect();
 
         values_parsed
+    }
+}
+
+impl<'a, J, K, U, V> TryExtend<(J, U)> for DBMap<K, V>
+where
+    J: Borrow<K>,
+    U: Borrow<V>,
+    K: Serialize,
+    V: Serialize,
+{
+    type Error = TypedStoreError;
+
+    fn try_extend<T>(&mut self, iter: &mut T) -> Result<(), Self::Error>
+    where
+        T: Iterator<Item = (J, U)>,
+    {
+        let batch = self.batch().insert_batch(self, iter)?;
+        batch.write()
+    }
+
+    fn try_extend_from_slice(&mut self, slice: &[(J, U)]) -> Result<(), Self::Error> {
+        let slice_of_refs = slice.iter().map(|(k, v)| (k.borrow(), v.borrow()));
+        let batch = self.batch().insert_batch(self, slice_of_refs)?;
+        batch.write()
     }
 }
 
