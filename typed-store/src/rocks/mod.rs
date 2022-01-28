@@ -282,6 +282,13 @@ where
         Ok(())
     }
 
+    fn clear(&self) -> Result<(), TypedStoreError> {
+        let _ = self.rocksdb.drop_cf(&self.cf);
+        self.rocksdb
+            .create_cf(self.cf.clone(), &rocksdb::Options::default())?;
+        Ok(())
+    }
+
     fn iter(&'a self) -> Self::Iterator {
         let mut db_iter = self.rocksdb.raw_iterator_cf(&self.cf());
         db_iter.seek_to_first();
