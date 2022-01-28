@@ -40,6 +40,12 @@ where
     /// Removes every key-value pair from the map
     fn clear(&self) -> Result<(), Self::Error>;
 
+    /// Returns the length of the map
+    fn len(&self) -> Result<usize, Self::Error>;
+
+    /// Returns whether the map is empty
+    fn is_empty(&self) -> Result<bool, Self::Error>;
+
     /// Returns an iterator visiting each key-value pair in the map.
     fn iter(&'a self) -> Self::Iterator;
 

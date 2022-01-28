@@ -289,6 +289,14 @@ where
         Ok(())
     }
 
+    fn len(&self) -> Result<usize, Self::Error> {
+        Ok(self.iter().count())
+    }
+
+    fn is_empty(&self) -> Result<bool, Self::Error> {
+        Ok(self.iter().count() == 0)
+    }
+
     fn iter(&'a self) -> Self::Iterator {
         let mut db_iter = self.rocksdb.raw_iterator_cf(&self.cf());
         db_iter.seek_to_first();
