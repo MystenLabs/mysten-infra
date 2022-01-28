@@ -316,7 +316,8 @@ fn test_delete_range() {
 
 #[test]
 fn test_clear() {
-    let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+    let db = DBMap::<i32, String>::open(temp_dir(), None, Some("table"))
+        .expect("Failed to open storage");
     // Test clear of empty map
     let _ = db.clear();
 
@@ -332,7 +333,7 @@ fn test_clear() {
     assert!(db.iter().count() > 1);
     let _ = db.clear();
     assert_eq!(db.iter().count(), 0);
-    // Clear again to ensue safety when clearing empty map
+    // Clear again to ensure safety when clearing empty map
     let _ = db.clear();
     assert_eq!(db.iter().count(), 0);
     // Clear with one item

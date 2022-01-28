@@ -283,8 +283,9 @@ where
     }
 
     fn clear(&self) -> Result<(), TypedStoreError> {
-        let del_batch = self.batch().delete_batch(self, self.keys())?;
-        let _ = del_batch.write();
+        let _ = self.rocksdb.drop_cf(&self.cf);
+        self.rocksdb
+            .create_cf(self.cf.clone(), &rocksdb::Options::default())?;
         Ok(())
     }
 
