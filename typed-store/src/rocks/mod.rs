@@ -7,9 +7,10 @@ mod values;
 
 use crate::traits::Map;
 use bincode::Options;
+use collectable::TryExtend;
 use rocksdb::{DBWithThreadMode, MultiThreaded, WriteBatch};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{marker::PhantomData, path::Path, sync::Arc};
+use std::{borrow::Borrow, marker::PhantomData, path::Path, sync::Arc};
 
 use self::{iter::Iter, keys::Keys, values::Values};
 pub use errors::TypedStoreError;
@@ -160,11 +161,10 @@ impl DBBatch {
 
 impl DBBatch {
     /// Deletes a set of keys given as an iterator
-    #[allow(clippy::map_collect_result_unit)] // we don't want a mutable argument
-    pub fn delete_batch<K: Serialize, T: Iterator<Item = K>, V>(
+    pub fn delete_batch<J: Borrow<K>, K: Serialize, V>(
         mut self,
         db: &DBMap<K, V>,
-        purged_vals: T,
+        purged_vals: impl IntoIterator<Item = J>,
     ) -> Result<Self, TypedStoreError> {
         if !Arc::ptr_eq(&db.rocksdb, &self.rocksdb) {
             return Err(TypedStoreError::CrossDBBatch);
@@ -174,13 +174,13 @@ impl DBBatch {
             .with_big_endian()
             .with_fixint_encoding();
         purged_vals
-            .map(|k| {
-                let k_buf = config.serialize(&k)?;
+            .into_iter()
+            .try_for_each::<_, Result<_, TypedStoreError>>(|k| {
+                let k_buf = config.serialize(k.borrow())?;
                 self.batch.delete_cf(&db.cf(), k_buf);
 
                 Ok(())
-            })
-            .collect::<Result<_, TypedStoreError>>()?;
+            })?;
         Ok(self)
     }
 
@@ -204,15 +204,12 @@ impl DBBatch {
         self.batch.delete_range_cf(&db.cf(), from_buf, to_buf);
         Ok(self)
     }
-}
 
-impl DBBatch {
     /// inserts a range of (key, value) pairs given as an iterator
-    #[allow(clippy::map_collect_result_unit)] // we don't want a mutable argument
-    pub fn insert_batch<K: Serialize, V: Serialize, T: Iterator<Item = (K, V)>>(
+    pub fn insert_batch<J: Borrow<K>, K: Serialize, U: Borrow<V>, V: Serialize>(
         mut self,
         db: &DBMap<K, V>,
-        new_vals: T,
+        new_vals: impl IntoIterator<Item = (J, U)>,
     ) -> Result<Self, TypedStoreError> {
         if !Arc::ptr_eq(&db.rocksdb, &self.rocksdb) {
             return Err(TypedStoreError::CrossDBBatch);
@@ -222,13 +219,13 @@ impl DBBatch {
             .with_big_endian()
             .with_fixint_encoding();
         new_vals
-            .map(|(ref k, ref v)| {
-                let k_buf = config.serialize(k)?;
-                let v_buf = bincode::serialize(v)?;
+            .into_iter()
+            .try_for_each::<_, Result<_, TypedStoreError>>(|(k, v)| {
+                let k_buf = config.serialize(k.borrow())?;
+                let v_buf = bincode::serialize(v.borrow())?;
                 self.batch.put_cf(&db.cf(), k_buf, v_buf);
                 Ok(())
-            })
-            .collect::<Result<_, TypedStoreError>>()?;
+            })?;
         Ok(self)
     }
 }
@@ -334,6 +331,30 @@ where
             .collect();
 
         values_parsed
+    }
+}
+
+impl<'a, J, K, U, V> TryExtend<(J, U)> for DBMap<K, V>
+where
+    J: Borrow<K>,
+    U: Borrow<V>,
+    K: Serialize,
+    V: Serialize,
+{
+    type Error = TypedStoreError;
+
+    fn try_extend<T>(&mut self, iter: &mut T) -> Result<(), Self::Error>
+    where
+        T: Iterator<Item = (J, U)>,
+    {
+        let batch = self.batch().insert_batch(self, iter)?;
+        batch.write()
+    }
+
+    fn try_extend_from_slice(&mut self, slice: &[(J, U)]) -> Result<(), Self::Error> {
+        let slice_of_refs = slice.iter().map(|(k, v)| (k.borrow(), v.borrow()));
+        let batch = self.batch().insert_batch(self, slice_of_refs)?;
+        batch.write()
     }
 }
 

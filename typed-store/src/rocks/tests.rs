@@ -201,6 +201,19 @@ fn test_values() {
 }
 
 #[test]
+fn test_try_extend() {
+    let mut db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+    let mut keys_vals = (1..100).map(|i| (i, i.to_string()));
+
+    db.try_extend(&mut keys_vals)
+        .expect("Failed to extend the DB with (k, v) pairs");
+    for (k, v) in keys_vals {
+        let val = db.get(&k).expect("Failed to get inserted key");
+        assert_eq!(Some(v), val);
+    }
+}
+
+#[test]
 fn test_insert_batch() {
     let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
     let keys_vals = (1..100).map(|i| (i, i.to_string()));
@@ -249,10 +262,12 @@ fn test_insert_batch_across_different_db() {
     let rocks = open_cf(temp_dir(), None, &["First_CF", "Second_CF"]).unwrap();
     let rocks2 = open_cf(temp_dir(), None, &["First_CF", "Second_CF"]).unwrap();
 
-    let db_cf_1 = DBMap::reopen(&rocks, Some("First_CF")).expect("Failed to open storage");
+    let db_cf_1: DBMap<i32, String> =
+        DBMap::reopen(&rocks, Some("First_CF")).expect("Failed to open storage");
     let keys_vals_1 = (1..100).map(|i| (i, i.to_string()));
 
-    let db_cf_2 = DBMap::reopen(&rocks2, Some("Second_CF")).expect("Failed to open storage");
+    let db_cf_2: DBMap<i32, String> =
+        DBMap::reopen(&rocks2, Some("Second_CF")).expect("Failed to open storage");
     let keys_vals_2 = (1000..1100).map(|i| (i, i.to_string()));
 
     assert!(db_cf_1
@@ -288,7 +303,8 @@ fn test_delete_batch() {
 
 #[test]
 fn test_delete_range() {
-    let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+    let db: DBMap<i32, String> =
+        DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
 
     // Note that the last element is (100, "100".to_owned()) here
     let keys_vals = (0..101).map(|i| (i, i.to_string()));
