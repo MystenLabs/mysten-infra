@@ -160,7 +160,6 @@ impl DBBatch {
 
 impl DBBatch {
     /// Deletes a set of keys given as an iterator
-    #[allow(clippy::map_collect_result_unit)] // we don't want a mutable argument
     pub fn delete_batch<K: Serialize, V>(
         mut self,
         db: &DBMap<K, V>,
@@ -175,13 +174,12 @@ impl DBBatch {
             .with_fixint_encoding();
         purged_vals
             .into_iter()
-            .map(|k| {
+            .try_for_each::<_, Result<_, TypedStoreError>>(|k| {
                 let k_buf = config.serialize(&k)?;
                 self.batch.delete_cf(&db.cf(), k_buf);
 
                 Ok(())
-            })
-            .collect::<Result<_, TypedStoreError>>()?;
+            })?;
         Ok(self)
     }
 
@@ -207,7 +205,6 @@ impl DBBatch {
     }
 
     /// inserts a range of (key, value) pairs given as an iterator
-    #[allow(clippy::map_collect_result_unit)] // we don't want a mutable argument
     pub fn insert_batch<K: Serialize, V: Serialize>(
         mut self,
         db: &DBMap<K, V>,
@@ -222,13 +219,12 @@ impl DBBatch {
             .with_fixint_encoding();
         new_vals
             .into_iter()
-            .map(|(ref k, ref v)| {
+            .try_for_each::<_, Result<_, TypedStoreError>>(|(ref k, ref v)| {
                 let k_buf = config.serialize(k)?;
                 let v_buf = bincode::serialize(v)?;
                 self.batch.put_cf(&db.cf(), k_buf, v_buf);
                 Ok(())
-            })
-            .collect::<Result<_, TypedStoreError>>()?;
+            })?;
         Ok(self)
     }
 }
