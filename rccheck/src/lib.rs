@@ -1,10 +1,14 @@
 // Copyright(C) 2022, Mysten Labs
 // SPDX-License-Identifier: Apache-2.0
-use std::time::SystemTime;
+use std::{fmt, time::SystemTime};
 
 use rustls::{
     client::{ServerCertVerified, ServerCertVerifier},
     server::{ClientCertVerified, ClientCertVerifier},
+};
+use serde::{
+    de::{Error, Visitor},
+    Deserialize, Deserializer, Serialize,
 };
 use x509_parser::certificate::X509Certificate;
 use x509_parser::{traits::FromDer, x509::SubjectPublicKeyInfo};
@@ -35,6 +39,58 @@ static SUPPORTED_SIG_ALGS: SignatureAlgorithms = &[&webpki::ECDSA_P256_SHA256, &
 pub struct Psk<'a>(pub SubjectPublicKeyInfo<'a>);
 
 impl<'a> Eq for Psk<'a> {}
+
+////////////////////////////////////////////////////////////////
+/// Ser/de
+////////////////////////////////////////////////////////////////
+
+impl<'a> Serialize for Psk<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_bytes(self.0.raw)
+    }
+}
+
+struct DerBytesVisitor;
+
+impl<'de> Visitor<'de> for DerBytesVisitor {
+    type Value = Psk<'de>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a borrowed Subject Public Key Info in DER format")
+    }
+
+    fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        let (_, spki) = SubjectPublicKeyInfo::from_der(v).map_err(Error::custom)?;
+        Ok(Psk(spki))
+    }
+
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+    where
+        E: Error,
+    {
+        let (_, spki) = SubjectPublicKeyInfo::from_der(v.as_bytes()).map_err(Error::custom)?;
+        Ok(Psk(spki))
+    }
+}
+
+impl<'de> Deserialize<'de> for Psk<'de> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_bytes(DerBytesVisitor)
+    }
+}
+
+////////////////////////////////////////////////////////////////
+/// end Ser/de
+////////////////////////////////////////////////////////////////
 
 /// A `ClientCertVerifier` that will ensure that every client provides a valid, expected
 /// certificate, without any name checking.
