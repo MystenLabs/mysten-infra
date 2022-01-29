@@ -7,6 +7,22 @@ use rustls::{client::ServerCertVerifier, server::ClientCertVerifier};
 use x509_parser::traits::FromDer;
 
 #[test]
+fn serde_round_trip() {
+    let subject_alt_names = vec!["localhost".to_string()];
+
+    let cert = generate_simple_self_signed(subject_alt_names).unwrap();
+    let cert_bytes: Vec<u8> = cert.serialize_der().unwrap();
+    let cert_parsed = X509Certificate::from_der(&cert_bytes[..])
+        .map_err(|_| rustls::Error::InvalidCertificateEncoding)
+        .unwrap();
+    let spki = cert_parsed.1.public_key().clone();
+    let psk = Psk(spki.clone());
+    let psk_bytes = bincode::serialize(&psk).unwrap();
+    let psk_roundtripped = bincode::deserialize::<Psk>(&psk_bytes).unwrap();
+    assert_eq!(psk, psk_roundtripped);
+}
+
+#[test]
 fn rc_gen_self_client() {
     let subject_alt_names = vec!["localhost".to_string()];
 
