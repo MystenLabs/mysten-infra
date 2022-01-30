@@ -358,3 +358,31 @@ fn test_clear() {
     let _ = db.clear();
     assert_eq!(db.iter().count(), 0);
 }
+
+#[test]
+fn test_is_empty() {
+    let db = DBMap::<i32, String>::open(temp_dir(), None, Some("table"))
+        .expect("Failed to open storage");
+
+    // Test empty map is truly empty
+    assert!(db.is_empty().unwrap());
+    let _ = db.clear();
+    assert!(db.is_empty().unwrap());
+
+    let keys_vals = (0..101).map(|i| (i, i.to_string()));
+    let insert_batch = db
+        .batch()
+        .insert_batch(&db, keys_vals)
+        .expect("Failed to batch insert");
+
+    let _ = insert_batch.write().expect("Failed to execute batch");
+
+    // Check we have multiple entries and not empty
+    assert!(db.iter().count() > 1);
+    assert!(!db.is_empty().unwrap());
+
+    // Clear again to ensure empty works after clearing
+    let _ = db.clear();
+    assert_eq!(db.iter().count(), 0);
+    assert!(db.is_empty().unwrap());
+}

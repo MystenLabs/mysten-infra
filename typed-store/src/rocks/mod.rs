@@ -286,6 +286,10 @@ where
         Ok(())
     }
 
+    fn is_empty(&self) -> Result<bool, Self::Error> {
+        Ok(self.iter().next().is_none())
+    }
+
     fn iter(&'a self) -> Self::Iterator {
         let mut db_iter = self.rocksdb.raw_iterator_cf(&self.cf());
         db_iter.seek_to_first();

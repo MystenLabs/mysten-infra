@@ -37,8 +37,11 @@ where
     /// Removes the entry for the given key from the map.
     fn remove(&self, key: &K) -> Result<(), Self::Error>;
 
-    /// Removes every key-value pair from the map
+    /// Removes every key-value pair from the map.
     fn clear(&self) -> Result<(), Self::Error>;
+
+    /// Returns true if the map is empty, otherwise false.
+    fn is_empty(&self) -> Result<bool, Self::Error>;
 
     /// Returns an iterator visiting each key-value pair in the map.
     fn iter(&'a self) -> Self::Iterator;
