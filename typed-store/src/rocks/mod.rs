@@ -245,7 +245,10 @@ where
             .with_big_endian()
             .with_fixint_encoding();
         // Try checking the bloom filter
-        if !self.rocksdb.key_may_exist_cf(&self.cf(), &config.serialize(key)?) {
+        if !self
+            .rocksdb
+            .key_may_exist_cf(&self.cf(), &config.serialize(key)?)
+        {
             // Defintely does not exist
             return Ok(false);
         }
