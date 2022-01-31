@@ -241,6 +241,15 @@ where
     type Values = Values<'a, V>;
 
     fn contains_key(&self, key: &K) -> Result<bool, TypedStoreError> {
+        let config = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
+        // Try checking the bloom filter
+        if !self.rocksdb.key_may_exist_cf(&self.cf(), &config.serialize(key)?) {
+            // Defintely does not exist
+            return Ok(false);
+        }
+        // Might exist. Do deeper check
         self.get(key).map(|v| v.is_some())
     }
 
