@@ -386,3 +386,49 @@ fn test_is_empty() {
     assert_eq!(db.iter().count(), 0);
     assert!(db.is_empty().unwrap());
 }
+
+#[test]
+fn test_multi_insert() {
+    // Init a DB
+    let db = DBMap::<i32, String>::open(temp_dir(), None, Some("table"))
+        .expect("Failed to open storage");
+    // Create kv pairs
+    let keys_vals = (0..101).map(|i| (i, i.to_string()));
+
+    db.multi_insert(keys_vals.clone())
+        .expect("Failed to multi-insert");
+
+    for (k, v) in keys_vals {
+        let val = db.get(&k).expect("Failed to get inserted key");
+        assert_eq!(Some(v), val);
+    }
+}
+
+#[test]
+fn test_multi_remove() {
+    // Init a DB
+    let db = DBMap::<i32, String>::open(temp_dir(), None, Some("table"))
+        .expect("Failed to open storage");
+    // Create kv pairs
+    let keys_vals = (0..101).map(|i| (i, i.to_string()));
+
+    db.multi_insert(keys_vals.clone())
+        .expect("Failed to multi-insert");
+
+    // Check insertion
+    for (k, v) in keys_vals.clone() {
+        let val = db.get(&k).expect("Failed to get inserted key");
+        assert_eq!(Some(v), val);
+    }
+
+    // Remove 50 items
+    db.multi_remove(keys_vals.clone().map(|kv| kv.0).take(50))
+        .expect("Failed to multi-remove");
+    assert_eq!(db.iter().count(), 101 - 50);
+
+    // Check that the remaining are present
+    for (k, v) in keys_vals.skip(50) {
+        let val = db.get(&k).expect("Failed to get inserted key");
+        assert_eq!(Some(v), val);
+    }
+}

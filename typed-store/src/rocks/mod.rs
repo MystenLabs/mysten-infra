@@ -336,6 +336,22 @@ where
 
         values_parsed
     }
+    fn multi_insert<J, U>(
+        &self,
+        key_val_pairs: impl IntoIterator<Item = (J, U)>,
+    ) -> Result<(), Self::Error>
+    where
+        J: Borrow<K>,
+        U: Borrow<V>,
+    {
+        self.batch().insert_batch(self, key_val_pairs)?.write()
+    }
+    fn multi_remove<J>(&self, keys: impl IntoIterator<Item = J>) -> Result<(), Self::Error>
+    where
+        J: Borrow<K>,
+    {
+        self.batch().delete_batch(self, keys)?.write()
+    }
 }
 
 impl<'a, J, K, U, V> TryExtend<(J, U)> for DBMap<K, V>
