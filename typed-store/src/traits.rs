@@ -1,7 +1,7 @@
 // Copyright(C) 2021, Mysten Labs
 // SPDX-License-Identifier: Apache-2.0
 use serde::{de::DeserializeOwned, Serialize};
-use std::error::Error;
+use std::{borrow::Borrow, error::Error};
 
 pub trait Map<'a, K, V>
 where
@@ -54,4 +54,18 @@ where
 
     /// Returns a vector of values corresponding to the keys provided.
     fn multi_get(&self, keys: &[K]) -> Result<Vec<Option<V>>, Self::Error>;
+
+    /// Inserts key-value pairs.
+    fn multi_insert<J, U>(
+        &self,
+        key_val_pairs: impl IntoIterator<Item = (J, U)>,
+    ) -> Result<(), Self::Error>
+    where
+        J: Borrow<K>,
+        U: Borrow<V>;
+
+    /// Removes keys.
+    fn multi_remove<J>(&self, keys: impl IntoIterator<Item = J>) -> Result<(), Self::Error>
+    where
+        J: Borrow<K>;
 }
