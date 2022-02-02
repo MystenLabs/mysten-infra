@@ -55,7 +55,7 @@ where
     /// Returns a vector of values corresponding to the keys provided.
     fn multi_get(&self, keys: &[K]) -> Result<Vec<Option<V>>, Self::Error>;
 
-    /// Inserts key-value pairs atomically.
+    /// Inserts key-value pairs.
     fn multi_insert<J, U>(
         &self,
         key_val_pairs: impl IntoIterator<Item = (J, U)>,
@@ -64,7 +64,7 @@ where
         J: Borrow<K>,
         U: Borrow<V>;
 
-    /// Removes keys atomically.
+    /// Removes keys.
     fn multi_remove<J>(&self, keys: impl IntoIterator<Item = J>) -> Result<(), Self::Error>
     where
         J: Borrow<K>;
