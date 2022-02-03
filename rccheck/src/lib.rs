@@ -15,7 +15,13 @@ use x509_parser::{traits::FromDer, x509::SubjectPublicKeyInfo};
 
 #[cfg(test)]
 #[path = "tests/psk.rs"]
-pub mod psk;
+mod psk;
+
+#[cfg(test)]
+#[path = "tests/test_utils.rs"]
+pub(crate) mod test_utils;
+
+pub mod certgen;
 
 type SignatureAlgorithms = &'static [&'static webpki::SignatureAlgorithm];
 static SUPPORTED_SIG_ALGS: SignatureAlgorithms = &[&webpki::ECDSA_P256_SHA256, &webpki::ED25519];
@@ -39,6 +45,13 @@ static SUPPORTED_SIG_ALGS: SignatureAlgorithms = &[&webpki::ECDSA_P256_SHA256, &
 pub struct Psk<'a>(pub SubjectPublicKeyInfo<'a>);
 
 impl<'a> Eq for Psk<'a> {}
+
+impl<'a> Psk<'a> {
+    pub fn from_der(bytes: &'a [u8]) -> Result<Psk<'a>, anyhow::Error> {
+        let spki = SubjectPublicKeyInfo::from_der(bytes)?;
+        Ok(Psk(spki.1))
+    }
+}
 
 ////////////////////////////////////////////////////////////////
 /// Ser/de
