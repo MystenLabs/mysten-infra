@@ -1,3 +1,6 @@
+// Copyright(C) 2022, Mysten Labs
+// SPDX-License-Identifier: Apache-2.0
+
 use proptest::prelude::*;
 use proptest::strategy::Strategy;
 

@@ -121,13 +121,18 @@ impl<'a> ClientCertVerifier for Psk<'a> {
         None
     }
 
+    // Verifies this is a valid certificate self-signed by the public key we expect(in PSK)
+    // 1. we check the equality of the certificate's public key with the key we expect
+    // 2. we prepare arguments for webpki's certificate verification (following the rustls implementation)
+    //    placing the public key at the root of the certificate chain (as it should be for a self-signed certificate)
+    // 3. we call webpki's certificate verification
     fn verify_client_cert(
         &self,
         end_entity: &rustls::Certificate,
         intermediates: &[rustls::Certificate],
         now: SystemTime,
     ) -> Result<ClientCertVerified, rustls::Error> {
-        // Check this matches the key we expect
+        // Step 1: Check this matches the key we expect
         let cert = X509Certificate::from_der(&end_entity.0[..])
             .map_err(|_| rustls::Error::InvalidCertificateEncoding)?;
         let spki = cert.1.public_key().clone();
@@ -139,8 +144,11 @@ impl<'a> ClientCertVerifier for Psk<'a> {
         }
 
         // We now check we're receiving correctly signed data with the expected key
+        // Step 2: prepare arguments
         let (cert, chain, trustroots) = prepare_for_self_signed(end_entity, intermediates)?;
         let now = webpki::Time::try_from(now).map_err(|_| rustls::Error::FailedToGetCurrentTime)?;
+
+        // Step 3: call verification from webpki
         cert.verify_is_valid_tls_client_cert(
             SUPPORTED_SIG_ALGS,
             &webpki::TlsClientTrustAnchors(&trustroots),
@@ -153,6 +161,11 @@ impl<'a> ClientCertVerifier for Psk<'a> {
 }
 
 impl<'a> ServerCertVerifier for Psk<'a> {
+    // Verifies this is a valid certificate self-signed by the public key we expect(in PSK)
+    // 1. we check the equality of the certificate's public key with the key we expect
+    // 2. we prepare arguments for webpki's certificate verification (following the rustls implementation)
+    //    placing the public key at the root of the certificate chain (as it should be for a self-signed certificate)
+    // 3. we call webpki's certificate verification
     fn verify_server_cert(
         &self,
         end_entity: &rustls::Certificate,
@@ -162,7 +175,7 @@ impl<'a> ServerCertVerifier for Psk<'a> {
         ocsp_response: &[u8],
         now: std::time::SystemTime,
     ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
-        // Check this matches the key we expect
+        // Step 1: Check this matches the key we expect
         let cert = X509Certificate::from_der(&end_entity.0[..])
             .map_err(|_| rustls::Error::InvalidCertificateEncoding)?;
         let spki = cert.1.public_key().clone();
@@ -174,6 +187,7 @@ impl<'a> ServerCertVerifier for Psk<'a> {
         }
 
         // Then we check this is actually a valid self-signed certificate with matching name
+        // Step 2: prepare arguments
         let (cert, chain, trustroots) = prepare_for_self_signed(end_entity, intermediates)?;
         let webpki_now =
             webpki::Time::try_from(now).map_err(|_| rustls::Error::FailedToGetCurrentTime)?;
@@ -186,6 +200,7 @@ impl<'a> ServerCertVerifier for Psk<'a> {
             _ => return Err(rustls::Error::UnsupportedNameType),
         };
 
+        // Step 3: call verification from webpki
         let cert = cert
             .verify_is_valid_tls_server_cert(
                 SUPPORTED_SIG_ALGS,
@@ -196,6 +211,7 @@ impl<'a> ServerCertVerifier for Psk<'a> {
             .map_err(pki_error)
             .map(|_| cert)?;
 
+        // log additional certificate transaparency info (which is pointless in our self-signed context) and return
         let mut peekable = scts.peekable();
         if peekable.peek().is_none() {
             tracing::trace!("Met unvalidated certificate transparency data");
@@ -217,6 +233,8 @@ type CertChainAndRoots<'a> = (
     Vec<webpki::TrustAnchor<'a>>,
 );
 
+// This prepares arguments for webpki, including a trust anchor which is the end entity of the certificate
+// (which embodies a self-signed certificate by definition)
 fn prepare_for_self_signed<'a>(
     end_entity: &'a rustls::Certificate,
     intermediates: &'a [rustls::Certificate],

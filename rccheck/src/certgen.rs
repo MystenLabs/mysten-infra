@@ -1,3 +1,6 @@
+// Copyright(C) 2022, Mysten Labs
+// SPDX-License-Identifier: Apache-2.0
+
 use ed25519::pkcs8::EncodePrivateKey;
 
 use rcgen::{CertificateParams, KeyPair, SignatureAlgorithm};
@@ -82,6 +85,8 @@ pub fn dalek_to_spki_bytes(pk: &ed25519_dalek::PublicKey) -> Vec<u8> {
         algorithm: pkcs8::spki::AlgorithmIdentifier {
             // ed25519 OID
             oid: ed25519::pkcs8::ALGORITHM_OID,
+            // some environments require a type ASN.1 NULL, use the commented alternative if so
+            // this instead matches our rcgen-produced certificates for compatibiltiy
             // use pkcs8::spki::der::asn1;
             parameters: None, // Some(asn1::Any::from(asn1::Null)),
         },
