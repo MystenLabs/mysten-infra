@@ -365,9 +365,9 @@ fn test_is_empty() {
         .expect("Failed to open storage");
 
     // Test empty map is truly empty
-    assert!(db.is_empty().unwrap());
+    assert!(db.is_empty());
     let _ = db.clear();
-    assert!(db.is_empty().unwrap());
+    assert!(db.is_empty());
 
     let keys_vals = (0..101).map(|i| (i, i.to_string()));
     let insert_batch = db
@@ -379,12 +379,12 @@ fn test_is_empty() {
 
     // Check we have multiple entries and not empty
     assert!(db.iter().count() > 1);
-    assert!(!db.is_empty().unwrap());
+    assert!(!db.is_empty());
 
     // Clear again to ensure empty works after clearing
     let _ = db.clear();
     assert_eq!(db.iter().count(), 0);
-    assert!(db.is_empty().unwrap());
+    assert!(db.is_empty());
 }
 
 #[test]

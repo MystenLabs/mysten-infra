@@ -286,8 +286,8 @@ where
         Ok(())
     }
 
-    fn is_empty(&self) -> Result<bool, Self::Error> {
-        Ok(self.iter().next().is_none())
+    fn is_empty(&self) -> bool {
+        self.iter().next().is_none()
     }
 
     fn iter(&'a self) -> Self::Iterator {
