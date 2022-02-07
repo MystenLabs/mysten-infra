@@ -21,6 +21,37 @@ mod tests;
 type DBRawIteratorMultiThreaded<'a> =
     rocksdb::DBRawIteratorWithThreadMode<'a, DBWithThreadMode<MultiThreaded>>;
 
+#[macro_export]
+// It generates a method (reopencfs) to reopen a list of column families.
+// The macro should be called by passing in the column family names and the
+// corresponding DBMap Key-Value types.
+//
+// Example: "cf_1";<String, u32>, "cf_2";<u32, u32>
+macro_rules! reopen {
+    ( $($cf:expr;<$K:ty, $V:ty>),* ) => {
+        // reopencfs calls the methods to open the configured column families.
+        //
+        // # Arguments
+        //
+        // * `db` - a rocks DB struct
+        //
+        // # Examples
+        //
+        // ```
+        // reopen("cf_1";<String, u32>, "cf_2";<u32, u32>);
+        // ....
+        // let (cf_1, cf_2) = reopencfs(&db);
+        // ```
+        fn reopencfs(db: &Arc<rocksdb::DBWithThreadMode<MultiThreaded>>) -> ($(DBMap<$K, $V>),*) {
+            return (
+            $(
+                DBMap::<$K, $V>::reopen(db, Some($cf)).expect(&format!("Cannot open {} CF.", $cf)[..])
+            ),*
+            )
+        }
+    };
+}
+
 /// An interface to a rocksDB database, keyed by a columnfamily
 #[derive(Clone, Debug)]
 pub struct DBMap<K, V> {
