@@ -14,14 +14,14 @@ use x509_parser::certificate::X509Certificate;
 use x509_parser::{traits::FromDer, x509::SubjectPublicKeyInfo};
 
 #[cfg(test)]
-#[path = "tests/psk.rs"]
-mod psk;
+#[path = "tests/psk_tests.rs"]
+mod psk_tests;
 
 #[cfg(test)]
 #[path = "tests/test_utils.rs"]
 pub(crate) mod test_utils;
 
-pub mod certgen;
+pub mod ed25519_certgen;
 
 type SignatureAlgorithms = &'static [&'static webpki::SignatureAlgorithm];
 static SUPPORTED_SIG_ALGS: SignatureAlgorithms = &[&webpki::ECDSA_P256_SHA256, &webpki::ED25519];
@@ -46,7 +46,7 @@ static SUPPORTED_SIG_ALGS: SignatureAlgorithms = &[&webpki::ECDSA_P256_SHA256, &
 /// use rccheck::*;
 /// let mut rng = rand::thread_rng();
 /// let keypair = ed25519_dalek::Keypair::generate(&mut rng);
-/// let spki = certgen::dalek_to_spki_bytes(&keypair.public);
+/// let spki = ed25519_certgen::dalek_to_spki_bytes(&keypair.public);
 /// let psk = Psk::from_der(&spki).unwrap();
 /// ```
 ///

@@ -6,8 +6,8 @@ use ed25519::pkcs8::EncodePrivateKey;
 use rcgen::{CertificateParams, KeyPair, SignatureAlgorithm};
 
 #[cfg(test)]
-#[path = "tests/certgen.rs"]
-mod certgen_tests;
+#[path = "tests/ed25519_certgen_tests.rs"]
+mod ed25519_certgen_tests;
 
 /**
 KISS function to generate a self signed certificate from a dalek keypair
@@ -16,15 +16,13 @@ reasonable defaults and generates a self signed certificate using the keypair pa
 ## Example
 ```
 extern crate rccheck;
-use rccheck::certgen::generate_self_signed_dalek;
-# fn main () {
+use rccheck::ed25519_certgen::generate_self_signed_dalek;
 # let mut rng = rand::thread_rng();
 let subject_alt_names = vec!["localhost".to_string()];
 let kp = ed25519_dalek::Keypair::generate(&mut rng);
 
 // let cert = generate_self_signed_dalek(subject_alt_names, kp).unwrap();
 // The certificate is now valid for localhost
-# }
 ```
 */
 pub fn generate_self_signed_dalek(
@@ -85,7 +83,7 @@ fn gen_certificate(
 /// use rccheck::*;
 /// let mut rng = rand::thread_rng();
 /// let keypair = ed25519_dalek::Keypair::generate(&mut rng);
-/// let spki = certgen::dalek_to_spki_bytes(&keypair.public); // readable by Psk::from_der
+/// let spki = ed25519_certgen::dalek_to_spki_bytes(&keypair.public); // readable by Psk::from_der
 /// ```
 pub fn dalek_to_spki_bytes(pk: &ed25519_dalek::PublicKey) -> Vec<u8> {
     let subject_public_key = pk.as_bytes();
