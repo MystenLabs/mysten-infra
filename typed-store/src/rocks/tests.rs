@@ -265,9 +265,7 @@ fn test_reopen_macro() {
 
     let rocks = open_cf(temp_dir(), None, &[FIRST_CF, SECOND_CF]).unwrap();
 
-    reopen!(FIRST_CF;<i32, String>, SECOND_CF;<i32, String>);
-
-    let (db_cf_1, db_cf_2) = reopencfs(&rocks);
+    let (db_cf_1, db_cf_2) = reopen!(&rocks, FIRST_CF;<i32, String>, SECOND_CF;<i32, String>);
 
     let keys_vals_cf1 = (1..100).map(|i| (i, i.to_string()));
     let keys_vals_cf2 = (1..100).map(|i| (i, i.to_string()));

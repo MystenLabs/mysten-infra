@@ -21,34 +21,41 @@ mod tests;
 type DBRawIteratorMultiThreaded<'a> =
     rocksdb::DBRawIteratorWithThreadMode<'a, DBWithThreadMode<MultiThreaded>>;
 
+/// a helper macro to reopen multiple column families
+/// # Arguments
+///
+/// * `db` - a reference to a rocks DB object
+/// * `cf;<ty,ty>` - a comma separated list of column families to open. For each
+/// column family a concatenation of column family name (cf) and Key-Value <ty, ty>
+/// should be provided.
+///
+/// # Examples
+///
+/// We open two different column families and we successfully write to them
+/// ```
+/// # #[macro_use] extern crate reopen;
+/// # use typed_store::rocks::*;
+/// # use tempfile::tempdir;
+///
+/// # fn main() {
+/// # const FIRST_CF: &str = "First_CF";
+/// # const SECOND_CF: &str = "Second_CF";
+///
+/// /// Create the rocks database reference for the desired column families
+/// let rocks = open_cf(temp_dir().unwrap(), None, &[FIRST_CF, SECOND_CF]).unwrap();
+///
+/// /// Now simply open all the column families for their expected Key-Value types
+/// let (db_cf_1, db_cf_2) = reopen!(&rocks, FIRST_CF;<i32, String>, SECOND_CF;<i32, String>);
+/// # }
+/// ```
 #[macro_export]
-// It generates a method (reopencfs) to reopen a list of column families.
-// The macro should be called by passing in the column family names and the
-// corresponding DBMap Key-Value types.
-//
-// Example: "cf_1";<String, u32>, "cf_2";<u32, u32>
 macro_rules! reopen {
-    ( $($cf:expr;<$K:ty, $V:ty>),* ) => {
-        // reopencfs calls the methods to open the configured column families.
-        //
-        // # Arguments
-        //
-        // * `db` - a rocks DB struct
-        //
-        // # Examples
-        //
-        // ```
-        // reopen("cf_1";<String, u32>, "cf_2";<u32, u32>);
-        // ....
-        // let (cf_1, cf_2) = reopencfs(&db);
-        // ```
-        fn reopencfs(db: &Arc<rocksdb::DBWithThreadMode<MultiThreaded>>) -> ($(DBMap<$K, $V>),*) {
-            return (
+    ( $db:expr, $($cf:expr;<$K:ty, $V:ty>),* ) => {
+        (
             $(
-                DBMap::<$K, $V>::reopen(db, Some($cf)).expect(&format!("Cannot open {} CF.", $cf)[..])
+                DBMap::<$K, $V>::reopen($db, Some($cf)).expect(&format!("Cannot open {} CF.", $cf)[..])
             ),*
-            )
-        }
+        )
     };
 }
 
