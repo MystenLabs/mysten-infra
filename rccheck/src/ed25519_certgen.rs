@@ -11,34 +11,6 @@ use crate::Certifiable;
 #[path = "tests/ed25519_certgen_tests.rs"]
 mod ed25519_certgen_tests;
 
-/**
-KISS function to generate a self signed certificate from a dalek keypair
-Given a set of domain names you want your certificate to be valid for, this function fills in the other generation parameters with
-reasonable defaults and generates a self signed certificate using the keypair passed as argument as output.
-## Example
-```
-extern crate rccheck;
-use rccheck::ed25519_certgen::generate_self_signed_dalek;
-# let mut rng = rand::thread_rng();
-let subject_alt_names = vec!["localhost".to_string()];
-let kp = ed25519_dalek::Keypair::generate(&mut rng);
-
-// let cert = generate_self_signed_dalek(subject_alt_names, kp).unwrap();
-// The certificate is now valid for localhost
-```
-*/
-pub fn generate_self_signed_dalek(
-    subject_names: impl Into<Vec<String>>,
-    kp: ed25519_dalek::Keypair,
-) -> Result<rustls::Certificate, anyhow::Error> {
-    let keypair_bytes = dalek_to_keypair_bytes(kp);
-    let (pkcs_bytes, alg) =
-        keypair_bytes_to_pkcs8_n_algo(keypair_bytes).map_err(anyhow::Error::new)?;
-
-    let certificate = gen_certificate(subject_names, (pkcs_bytes.as_ref(), alg))?;
-    Ok(certificate)
-}
-
 fn dalek_to_keypair_bytes(dalek_kp: ed25519_dalek::Keypair) -> ed25519::KeypairBytes {
     let private = dalek_kp.secret;
     let _public = dalek_kp.public;
@@ -79,17 +51,40 @@ fn gen_certificate(
     Ok(rustls::Certificate(cert_bytes))
 }
 
+// Token struct to peg this purely functional impl on
 pub struct Ed25519 {}
 impl Certifiable for Ed25519 {
     type PublicKey = ed25519_dalek::PublicKey;
 
     type KeyPair = ed25519_dalek::Keypair;
 
+    /// KISS function to generate a self signed certificate from a dalek keypair
+    /// Given a set of domain names you want your certificate to be valid for, this function fills in the other generation parameters with
+    /// reasonable defaults and generates a self signed certificate using the keypair passed as argument as output.
+    ///
+    /// ## Example
+    /// ```
+    /// extern crate rccheck;
+    /// use rccheck::ed25519_certgen::Ed25519;
+    /// use rccheck::Certifiable;
+    /// # let mut rng = rand::thread_rng();
+    /// let subject_alt_names = vec!["localhost".to_string()];
+    /// let kp = ed25519_dalek::Keypair::generate(&mut rng);
+    ///
+    /// let cert = Ed25519::keypair_to_certificate(subject_alt_names, kp).unwrap();
+    /// // The certificate is now valid for localhost
+    /// ```
+    ///
     fn keypair_to_certificate(
         subject_names: impl Into<Vec<String>>,
         kp: Self::KeyPair,
     ) -> Result<rustls::Certificate, anyhow::Error> {
-        generate_self_signed_dalek(subject_names, kp)
+        let keypair_bytes = dalek_to_keypair_bytes(kp);
+        let (pkcs_bytes, alg) =
+            keypair_bytes_to_pkcs8_n_algo(keypair_bytes).map_err(anyhow::Error::new)?;
+
+        let certificate = gen_certificate(subject_names, (pkcs_bytes.as_ref(), alg))?;
+        Ok(certificate)
     }
 
     /// This produces X.509 `SubjectPublicKeyInfo` (SPKI) as defined in [RFC 5280 Section 4.1.2.7].
