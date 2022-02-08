@@ -48,7 +48,7 @@ type DBRawIteratorMultiThreaded<'a> =
 /// let rocks = open_cf(tempdir().unwrap(), None, &[FIRST_CF, SECOND_CF]).unwrap();
 ///
 /// /// Now simply open all the column families for their expected Key-Value types
-/// let (db_cf_1, db_cf_2) = reopen!(&rocks, FIRST_CF;<i32, String>, SECOND_CF;<i32, String>);
+/// let (db_map_1, db_map_2) = reopen!(&rocks, FIRST_CF;<i32, String>, SECOND_CF;<i32, String>);
 /// # }
 /// ```
 #[macro_export]
