@@ -30,7 +30,7 @@ proptest! {
         let subject_alt_names = vec!["localhost".to_string()];
         let public_key = kp.public;
 
-        let cert = generate_self_signed_dalek(subject_alt_names, kp).unwrap();
+        let cert = Ed25519::keypair_to_certificate(subject_alt_names, kp).unwrap();
 
         let spki = Ed25519::public_key_to_spki(&public_key);
         let psk = Psk::from_der(&spki).unwrap();
@@ -60,7 +60,7 @@ proptest! {
     ) {
         let subject_alt_names = vec!["localhost".to_string()];
 
-        let cert = generate_self_signed_dalek(subject_alt_names, kp).unwrap();
+        let cert = Ed25519::keypair_to_certificate(subject_alt_names, kp).unwrap();
 
         let spki = Ed25519::public_key_to_spki(&public_key);
         let psk = Psk::from_der(&spki).unwrap();
