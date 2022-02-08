@@ -40,7 +40,16 @@ static SUPPORTED_SIG_ALGS: SignatureAlgorithms = &[&webpki::ECDSA_P256_SHA256, &
 /// [RFC 5280 Section 4.1.2.7]: https://tools.ietf.org/html/rfc5280#section-4.1.2.7
 ///
 /// We only support ECDSA P-256 & Ed25519 (for now).
-
+///
+/// Example
+/// ```
+/// use rccheck::*;
+/// let mut rng = rand::thread_rng();
+/// let keypair = ed25519_dalek::Keypair::generate(&mut rng);
+/// let spki = certgen::dalek_to_spki_bytes(&keypair.public);
+/// let psk = Psk::from_der(&spki).unwrap();
+/// ```
+///
 #[derive(PartialEq, Clone, Debug)]
 pub struct Psk<'a>(pub SubjectPublicKeyInfo<'a>);
 

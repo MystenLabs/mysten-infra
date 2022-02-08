@@ -78,6 +78,15 @@ fn gen_certificate(
     Ok(rustls::Certificate(cert_bytes))
 }
 
+/// This produces X.509 `SubjectPublicKeyInfo` (SPKI) as defined in [RFC 5280 Section 4.1.2.7].
+/// in DER-encoded format, serialized to a byte string.
+/// Example
+/// ```
+/// use rccheck::*;
+/// let mut rng = rand::thread_rng();
+/// let keypair = ed25519_dalek::Keypair::generate(&mut rng);
+/// let spki = certgen::dalek_to_spki_bytes(&keypair.public); // readable by Psk::from_der
+/// ```
 pub fn dalek_to_spki_bytes(pk: &ed25519_dalek::PublicKey) -> Vec<u8> {
     let subject_public_key = pk.as_bytes();
 
