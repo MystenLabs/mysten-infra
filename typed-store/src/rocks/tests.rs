@@ -41,6 +41,9 @@ fn test_reopen_macro() {
     let keys_vals_cf1 = (1..100).map(|i| (i, i.to_string()));
     let keys_vals_cf2 = (1..100).map(|i| (i, i.to_string()));
 
+    assert_eq!(db_cf_1.cf, FIRST_CF);
+    assert_eq!(db_cf_2.cf, SECOND_CF);
+
     assert!(db_cf_1.multi_insert(keys_vals_cf1).is_ok());
     assert!(db_cf_2.multi_insert(keys_vals_cf2).is_ok());
 }

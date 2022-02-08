@@ -21,7 +21,9 @@ mod tests;
 type DBRawIteratorMultiThreaded<'a> =
     rocksdb::DBRawIteratorWithThreadMode<'a, DBWithThreadMode<MultiThreaded>>;
 
-/// a helper macro to reopen multiple column families
+/// A helper macro to reopen multiple column families. The macro returns
+/// a tuple of DBMap structs in the same order that the column families
+/// are defined.
 ///
 /// # Arguments
 ///
