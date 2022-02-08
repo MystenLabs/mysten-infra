@@ -21,6 +21,47 @@ mod tests;
 type DBRawIteratorMultiThreaded<'a> =
     rocksdb::DBRawIteratorWithThreadMode<'a, DBWithThreadMode<MultiThreaded>>;
 
+/// A helper macro to reopen multiple column families. The macro returns
+/// a tuple of DBMap structs in the same order that the column families
+/// are defined.
+///
+/// # Arguments
+///
+/// * `db` - a reference to a rocks DB object
+/// * `cf;<ty,ty>` - a comma separated list of column families to open. For each
+/// column family a concatenation of column family name (cf) and Key-Value <ty, ty>
+/// should be provided.
+///
+/// # Examples
+///
+/// We successfully open two different column families.
+/// ```
+/// # use typed_store::reopen;
+/// # use typed_store::rocks::*;
+/// # use tempfile::tempdir;
+///
+/// # fn main() {
+/// const FIRST_CF: &str = "First_CF";
+/// const SECOND_CF: &str = "Second_CF";
+///
+/// /// Create the rocks database reference for the desired column families
+/// let rocks = open_cf(tempdir().unwrap(), None, &[FIRST_CF, SECOND_CF]).unwrap();
+///
+/// /// Now simply open all the column families for their expected Key-Value types
+/// let (db_map_1, db_map_2) = reopen!(&rocks, FIRST_CF;<i32, String>, SECOND_CF;<i32, String>);
+/// # }
+/// ```
+#[macro_export]
+macro_rules! reopen {
+    ( $db:expr, $($cf:expr;<$K:ty, $V:ty>),* ) => {
+        (
+            $(
+                DBMap::<$K, $V>::reopen($db, Some($cf)).expect(&format!("Cannot open {} CF.", $cf)[..])
+            ),*
+        )
+    };
+}
+
 /// An interface to a rocksDB database, keyed by a columnfamily
 #[derive(Clone, Debug)]
 pub struct DBMap<K, V> {
