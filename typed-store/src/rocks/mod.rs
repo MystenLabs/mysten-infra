@@ -22,6 +22,7 @@ type DBRawIteratorMultiThreaded<'a> =
     rocksdb::DBRawIteratorWithThreadMode<'a, DBWithThreadMode<MultiThreaded>>;
 
 /// a helper macro to reopen multiple column families
+///
 /// # Arguments
 ///
 /// * `db` - a reference to a rocks DB object
@@ -31,18 +32,18 @@ type DBRawIteratorMultiThreaded<'a> =
 ///
 /// # Examples
 ///
-/// We open two different column families and we successfully write to them
+/// We successfully open two different column families.
 /// ```
-/// # #[macro_use] extern crate reopen;
+/// # use typed_store::reopen;
 /// # use typed_store::rocks::*;
 /// # use tempfile::tempdir;
 ///
 /// # fn main() {
-/// # const FIRST_CF: &str = "First_CF";
-/// # const SECOND_CF: &str = "Second_CF";
+/// const FIRST_CF: &str = "First_CF";
+/// const SECOND_CF: &str = "Second_CF";
 ///
 /// /// Create the rocks database reference for the desired column families
-/// let rocks = open_cf(temp_dir().unwrap(), None, &[FIRST_CF, SECOND_CF]).unwrap();
+/// let rocks = open_cf(tempdir().unwrap(), None, &[FIRST_CF, SECOND_CF]).unwrap();
 ///
 /// /// Now simply open all the column families for their expected Key-Value types
 /// let (db_cf_1, db_cf_2) = reopen!(&rocks, FIRST_CF;<i32, String>, SECOND_CF;<i32, String>);

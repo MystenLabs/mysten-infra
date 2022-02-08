@@ -30,6 +30,22 @@ fn test_reopen() {
 }
 
 #[test]
+fn test_reopen_macro() {
+    const FIRST_CF: &str = "First_CF";
+    const SECOND_CF: &str = "Second_CF";
+
+    let rocks = open_cf(temp_dir(), None, &[FIRST_CF, SECOND_CF]).unwrap();
+
+    let (db_cf_1, db_cf_2) = reopen!(&rocks, FIRST_CF;<i32, String>, SECOND_CF;<i32, String>);
+
+    let keys_vals_cf1 = (1..100).map(|i| (i, i.to_string()));
+    let keys_vals_cf2 = (1..100).map(|i| (i, i.to_string()));
+
+    assert!(db_cf_1.multi_insert(keys_vals_cf1).is_ok());
+    assert!(db_cf_2.multi_insert(keys_vals_cf2).is_ok());
+}
+
+#[test]
 fn test_wrong_reopen() {
     let rocks = open_cf(temp_dir(), None, &["foo", "bar", "baz"]).unwrap();
     let db = DBMap::<u8, u8>::reopen(&rocks, Some("quux"));
@@ -256,22 +272,6 @@ fn test_insert_batch_across_cf() {
         let val = db_cf_2.get(&k).expect("Failed to get inserted key");
         assert_eq!(Some(v), val);
     }
-}
-
-#[test]
-fn test_reopen_macro() {
-    const FIRST_CF: &str = "First_CF";
-    const SECOND_CF: &str = "Second_CF";
-
-    let rocks = open_cf(temp_dir(), None, &[FIRST_CF, SECOND_CF]).unwrap();
-
-    let (db_cf_1, db_cf_2) = reopen!(&rocks, FIRST_CF;<i32, String>, SECOND_CF;<i32, String>);
-
-    let keys_vals_cf1 = (1..100).map(|i| (i, i.to_string()));
-    let keys_vals_cf2 = (1..100).map(|i| (i, i.to_string()));
-
-    assert!(db_cf_1.multi_insert(keys_vals_cf1).is_ok());
-    assert!(db_cf_2.multi_insert(keys_vals_cf2).is_ok());
 }
 
 #[test]
