@@ -1,5 +1,15 @@
 // Copyright(C) 2022, Mysten Labs
 // SPDX-License-Identifier: Apache-2.0
+
+//! THe purpose of this module is to afford the user that already does public key infrastructure on their hosts the ability to perform
+//! authentication with TLS certificates (more specifically using rustls) using that PKI infrastructure alone. The Public keys are hence deemed pre-shared.
+//!
+//! This module hence helps with the creation of rustls Client and Server verifiers which expect the certificate they verify to be a self-signed certificate,
+//! signed by an expected public key in the form of an X509 SubjectPublicKeyInfo element.
+//!
+//! In certgen, We also offer a trait `Certifiable` (and convenience implementation) that closes the loop: it can convert a key pair into a valid self-signed certificate,
+//! and a public key of the same format into some X509 SubjectPublicKeyInfo.
+
 use std::{fmt, time::SystemTime};
 
 use rustls::{
@@ -26,6 +36,21 @@ pub mod ed25519_certgen;
 type SignatureAlgorithms = &'static [&'static webpki::SignatureAlgorithm];
 static SUPPORTED_SIG_ALGS: SignatureAlgorithms = &[&webpki::ECDSA_P256_SHA256, &webpki::ED25519];
 
+/// A trait that offers the key conversions necessary for generating and verifying self-signed certificates matching an expected key
+pub trait Certifiable {
+    type PublicKey;
+    type KeyPair;
+
+    /// This generates a self-signed X509 certificate with the provided key pair
+    fn keypair_to_certificate(
+        subject_names: impl Into<Vec<String>>,
+        kp: Self::KeyPair,
+    ) -> Result<rustls::Certificate, anyhow::Error>;
+
+    /// This generates X.509 `SubjectPublicKeyInfo` (SPKI) bytes (in DER format) from the provided public key
+    fn public_key_to_spki(public_key: &Self::PublicKey) -> Vec<u8>;
+}
+
 /// X.509 `SubjectPublicKeyInfo` (SPKI) as defined in [RFC 5280 Section 4.1.2.7].
 ///
 /// ASN.1 structure containing an [`AlgorithmIdentifier`] and public key
@@ -46,7 +71,7 @@ static SUPPORTED_SIG_ALGS: SignatureAlgorithms = &[&webpki::ECDSA_P256_SHA256, &
 /// use rccheck::*;
 /// let mut rng = rand::thread_rng();
 /// let keypair = ed25519_dalek::Keypair::generate(&mut rng);
-/// let spki = ed25519_certgen::dalek_to_spki_bytes(&keypair.public);
+/// let spki = ed25519_certgen::Ed25519::public_key_to_spki(&keypair.public);
 /// let psk = Psk::from_der(&spki).unwrap();
 /// ```
 ///

@@ -5,7 +5,7 @@ use std::time::SystemTime;
 
 use crate::{
     test_utils::{dalek_keypair_strategy, dalek_pubkey_strategy},
-    Psk,
+    Certifiable, Psk,
 };
 
 use super::*;
@@ -18,7 +18,7 @@ proptest! {
     fn ed25519_keys_to_spki(
         pub_key in dalek_pubkey_strategy(),
     ){
-        let spki = dalek_to_spki_bytes(&pub_key);
+        let spki = Ed25519::public_key_to_spki(&pub_key);
         let psk = Psk::from_der(&spki);
         psk.unwrap();
     }
@@ -32,7 +32,7 @@ proptest! {
 
         let cert = generate_self_signed_dalek(subject_alt_names, kp).unwrap();
 
-        let spki = dalek_to_spki_bytes(&public_key);
+        let spki = Ed25519::public_key_to_spki(&public_key);
         let psk = Psk::from_der(&spki).unwrap();
         let now = SystemTime::now();
 
@@ -62,7 +62,7 @@ proptest! {
 
         let cert = generate_self_signed_dalek(subject_alt_names, kp).unwrap();
 
-        let spki = dalek_to_spki_bytes(&public_key);
+        let spki = Ed25519::public_key_to_spki(&public_key);
         let psk = Psk::from_der(&spki).unwrap();
         let now = SystemTime::now();
 
