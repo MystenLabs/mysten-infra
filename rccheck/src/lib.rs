@@ -1,8 +1,10 @@
 // Copyright(C) 2022, Mysten Labs
 // SPDX-License-Identifier: Apache-2.0
 
-//! THe purpose of this module is to afford the user that already does public key infrastructure on their hosts the ability to perform
-//! authentication with TLS certificates (more specifically using rustls) using that PKI infrastructure alone. The Public keys are hence deemed pre-shared.
+//! The purpose of this module is to afford the user that already has public key infrastructure on their hosts [^1] the ability to perform
+//! authentication with TLS certificates (more specifically using rustls) using those pre-distributed public keys alone. The Public keys are hence deemed pre-shared.
+//!
+//! [^1]: i.e. each host knows the public keys of all the other hosts
 //!
 //! This module hence helps with the creation of rustls Client and Server verifiers which expect the certificate they verify to be a self-signed certificate,
 //! signed by an expected public key in the form of an X509 SubjectPublicKeyInfo element.
