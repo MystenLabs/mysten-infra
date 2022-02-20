@@ -1,7 +1,7 @@
-use crate::reopen;
-// Copyright(C) 2021, Mysten Labs
+// Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 use super::*;
+use crate::reopen;
 
 fn temp_dir() -> std::path::PathBuf {
     tempfile::tempdir()
