@@ -1,31 +1,31 @@
+use std::future;
 use tokio::{sync::mpsc::{channel, Receiver, }};
 use std::future::Future;
+use tokio::sync::oneshot::Sender;
 
 type IrrecoverableError = std::io::Error;
 
+
 pub struct Component {
-    complete: Receiver<()>,
-    handle: tokio::task::JoinHandle<Result<(), IrrecoverableError>>,
+    complete: Receiver<IrrecoverableError>,
+    handle: tokio::task::JoinHandle<Result<(), Err()>>,
 }
 
 pub struct ComponentManager {
-   // message_receivers: Vec<Receiver<IrrecoverableError>>,
     handles: Vec<Component>,
 }
 
 impl ComponentManager {
     fn new() -> ComponentManager {
-        // let mut message_receivers = Vec::new();
         let mut handles = Vec::new();
         ComponentManager{handles}
     }
 
-    fn spawn<F>(&mut self, future:F) -> &Component //  input param: function that takes a sender as a param
-        where F: Future<Output = Result<(), IrrecoverableError>> + Send + 'static,
+    fn spawn<F>(&mut self, f:F) -> &Component //  input param: function that takes a sender as a param and returns a future
+    where F: Fn(Sender<IrrecoverableError>) -> Future<Output = ()>
     {
         let (sender, mut receiver) = channel(10);
-
-        let wrapped_handle = tokio::spawn(future(sender));
+        let wrapped_handle = tokio::spawn(f(sender));
         let mut component = Component{complete: receiver, handle: wrapped_handle};
         self.handles.push(component);
         &component
