@@ -116,12 +116,20 @@ fn test_skip() {
     assert_eq!(key_vals[0], (456, "456".to_string()));
     assert_eq!(key_vals[1], (789, "789".to_string()));
 
-    // Skip to the end
+    // Skip all smaller: same for the keys iterator
+    let keys: Vec<_> = db.keys().skip_to(&456).expect("Seek failed").collect();
+    assert_eq!(keys.len(), 2);
+    assert_eq!(keys[0], (456));
+    assert_eq!(keys[1], (789));
 
+    // Skip to the end
     assert_eq!(db.iter().skip_to(&999).expect("Seek failed").count(), 0);
+    // same for the keys
+    assert_eq!(db.keys().skip_to(&999).expect("Seek failed").count(), 0);
 
     // Skip to successor of first value
     assert_eq!(db.iter().skip_to(&000).expect("Skip failed").count(), 3);
+    assert_eq!(db.keys().skip_to(&000).expect("Skip failed").count(), 3);
 }
 
 #[test]
@@ -143,11 +151,24 @@ fn test_skip_to_previous_simple() {
         .collect();
     assert_eq!(key_vals.len(), 1);
     assert_eq!(key_vals[0], (789, "789".to_string()));
+    // Same for the keys iterator
+    let keys: Vec<_> = db
+        .keys()
+        .skip_prior_to(&999)
+        .expect("Seek failed")
+        .collect();
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0], (789));
 
     // Skip to prior of first value
     // Note: returns an empty iterator!
     assert_eq!(
         db.iter().skip_prior_to(&000).expect("Seek failed").count(),
+        0
+    );
+    // Same for the keys iterator
+    assert_eq!(
+        db.keys().skip_prior_to(&000).expect("Seek failed").count(),
         0
     );
 }
@@ -161,6 +182,7 @@ fn test_iter_skip_to_previous_gap() {
         }
     }
 
+    // Skip prior to will return an iterator starting with an "unexpected" key if the sought one is not in the table
     let db_iter = db.iter().skip_prior_to(&50).unwrap();
 
     assert_eq!(
@@ -168,6 +190,13 @@ fn test_iter_skip_to_previous_gap() {
             .chain(51..100)
             .map(|i| (i, i.to_string()))
             .collect::<Vec<_>>(),
+        db_iter.collect::<Vec<_>>()
+    );
+    // Same logic in the keys iterator
+    let db_iter = db.keys().skip_prior_to(&50).unwrap();
+
+    assert_eq!(
+        (49..50).chain(51..100).collect::<Vec<_>>(),
         db_iter.collect::<Vec<_>>()
     );
 }
