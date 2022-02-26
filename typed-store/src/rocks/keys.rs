@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 use bincode::Options;
 
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
 
-use super::DBRawIteratorMultiThreaded;
+use super::{DBRawIteratorMultiThreaded, TypedStoreError};
 
 /// An iterator over the keys of a prefix.
 pub struct Keys<'a, K> {
@@ -37,5 +37,29 @@ impl<'a, K: DeserializeOwned> Iterator for Keys<'a, K> {
         } else {
             None
         }
+    }
+}
+
+impl<'a, K: Serialize> Keys<'a, K> {
+    /// Skips all the elements that are smaller than the given key,
+    /// and either lands on the key or the first one greater than
+    /// the key.
+    pub fn skip_to(mut self, key: &K) -> Result<Self, TypedStoreError> {
+        let config = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
+        self.db_iter.seek(config.serialize(key)?);
+        Ok(self)
+    }
+
+    /// Moves the iterator the element given or
+    /// the one prior to it if it does not exist. If there is
+    /// no element prior to it, it returns an empty iterator.
+    pub fn skip_prior_to(mut self, key: &K) -> Result<Self, TypedStoreError> {
+        let config = bincode::DefaultOptions::new()
+            .with_big_endian()
+            .with_fixint_encoding();
+        self.db_iter.seek_for_prev(config.serialize(key)?);
+        Ok(self)
     }
 }
