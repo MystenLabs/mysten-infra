@@ -8,7 +8,7 @@ repository = "https://github.com/mystenlabs/mysten-infra"
 edition = "2021"
 
 [dependencies]
-rocksdb = "0.17.0"
+rocksdb = "0.18.0"
 eyre = "0.6.5"
 serde = { version = "1.0.133", features = ["derive"]}
 bincode = "1.3.3"
