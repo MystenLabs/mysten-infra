@@ -22,4 +22,4 @@ pkcs8 = { version = "0.8.0", features = ["std"] }
 [dev-dependencies]
 bincode = "1.3.3"
 proptest = "1.0.0"
-rand = "0.7.3"
+rand = "0.8.5"
