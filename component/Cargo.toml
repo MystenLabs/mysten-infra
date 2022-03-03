@@ -6,5 +6,5 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1.15.0", features = ["sync", "macros", "rt", "rt-multi-thread", "time"] }
+tokio = { version = "1.15.0", features = ["sync", "macros", "rt", "rt-multi-thread", "time", "signal"] }
 futures = {version = " 0.3.8"}
