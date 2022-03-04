@@ -1,3 +1,5 @@
+mod example;
+
 use futures::future;
 use tokio::signal;
 use tokio::{sync::mpsc::{channel, Sender, Receiver}};
@@ -28,7 +30,7 @@ impl Component{
 }
 
 
-pub async fn spawn<M>(starter: M) -> Component
+pub fn spawn<M>(starter: M) -> Component
 where M: Manageable + Send + Copy + 'static
 {
     let (panic_sender, panic_receiver) = channel(10);
@@ -48,6 +50,8 @@ pub async fn run_supervision(mut c: Component) ->Result<(), std::io::Error> {
     // panic signal incoming => log, terminate and restart
     // ctrl + c signal => send shutdown signal
     //
+    c.join_handle.await;
+
     loop {
         tokio::select! {
             message = c.panic_signal.recv() => {
@@ -69,7 +73,6 @@ pub async fn run_supervision(mut c: Component) ->Result<(), std::io::Error> {
             }
         }
     }
-
 }
 
 pub async fn terminate(shutdown_sender: oneshotSender<()>, mut join_handle: TokioJoinHande) -> Result<(), std::io::Error> {
