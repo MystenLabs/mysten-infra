@@ -68,4 +68,10 @@ impl<'a, K: Serialize, V> Iter<'a, K, V> {
         self.db_iter.seek_for_prev(config.serialize(key)?);
         Ok(self)
     }
+
+    /// Seeks to the last key in the database (at this column family).
+    pub fn skip_to_last(mut self) -> Self {
+        self.db_iter.seek_to_last();
+        self
+    }
 }

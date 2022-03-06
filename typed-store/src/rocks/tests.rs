@@ -127,6 +127,14 @@ fn test_skip() {
     // same for the keys
     assert_eq!(db.keys().skip_to(&999).expect("Seek failed").count(), 0);
 
+    // Skip to last
+    assert_eq!(
+        db.iter().skip_to_last().next(),
+        Some((789, "789".to_string()))
+    );
+    // same for the keys
+    assert_eq!(db.keys().skip_to_last().next(), Some(789));
+
     // Skip to successor of first value
     assert_eq!(db.iter().skip_to(&000).expect("Skip failed").count(), 3);
     assert_eq!(db.keys().skip_to(&000).expect("Skip failed").count(), 3);
