@@ -1,15 +1,23 @@
-use crate::{Manageable, IrrecoverableError, spawn, run_supervision};
+use crate::{run_supervision, spawn, IrrecoverableError, Manageable};
 
+use async_trait::async_trait;
 use futures::future;
 use futures::stream::FuturesUnordered;
-use tokio::{sync::mpsc::{channel, Sender, Receiver}};
-use tokio::sync::oneshot::{channel as oneshotChannel, Sender as oneshotSender, Receiver as oneshotReceiver};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::oneshot::{
+    channel as oneshotChannel, Receiver as oneshotReceiver, Sender as oneshotSender,
+};
 
 #[derive(Copy, Clone)]
 pub struct ComponentTypeA {}
 
+#[async_trait]
 impl Manageable for ComponentTypeA {
-    fn start(&self, panic_signal: Sender<IrrecoverableError>, shutdown_signal: oneshotReceiver<()>) -> future::BoxFuture<'static, ()> {
+    async fn start(
+        &self,
+        panic_signal: Sender<IrrecoverableError>,
+        shutdown_signal: oneshotReceiver<()>,
+    ) -> () {
         match something_that_must_happen() {
             Ok(..) => {}
             Err(error) => {
@@ -29,7 +37,7 @@ impl Manageable for ComponentTypeA {
 }
 
 pub fn something_that_must_happen() -> Result<(), std::io::Error> {
-    return Ok(())
+    return Ok(());
 }
 
 #[tokio::main]
