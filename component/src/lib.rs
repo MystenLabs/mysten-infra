@@ -27,7 +27,7 @@ pub trait Manageable {
 
     // The API for cleanup after the task has encountered an irrecoverable error
     async fn handle_irrecoverable(
-        &mut self,
+        &self,
         irrecoverable: IrrecoverableError,
     ) -> Result<(), anyhow::Error>;
 }
@@ -80,42 +80,44 @@ impl<M: Manageable + Send + Clone> Component<M> {
         // ctrl + c signal => send shutdown signal
         //
 
-        loop {
-            tokio::select! {
-                Some(message) = self.panic_signal.recv() => {
+        if let Some(mut handle) = self.join_handle {
+            loop {
+                tokio::select! {
+                    Some(message) = self.panic_signal.recv() => {
 
-                    println!("panic message received: {:?}", message.to_string());
-                    self.start_fn.handle_irrecoverable(message).await;
-                    // self.terminate().await?;
+                        println!("panic message received: {:?}", message.to_string());
+                        self.start_fn.handle_irrecoverable(message).await;
+                        // self.terminate().await?;
 
-                    // restart
-                    // This is eerily similar to spawn
-                    let (panic_sender, panic_receiver) = channel(10);
-                    let (cancel_sender, cancel_receiver) = oneshotChannel();
+                        // restart
+                        // This is eerily similar to spawn
+                        let (panic_sender, panic_receiver) = channel(10);
+                        let (cancel_sender, cancel_receiver) = oneshotChannel();
 
-                    let wrapped_handle: tokio::task::JoinHandle<()> =  self.start_fn.start(panic_sender, cancel_receiver).await;
+                        let wrapped_handle: tokio::task::JoinHandle<()> =  self.start_fn.start(panic_sender, cancel_receiver).await;
 
-                    self.panic_signal = panic_receiver;
-                    self.shutdown_signal = cancel_sender;
-                    self.join_handle = Some(wrapped_handle);
+                        self.panic_signal = panic_receiver;
+                        self.shutdown_signal = cancel_sender;
+                        self.join_handle = Some(wrapped_handle);
 
-                }
+                    }
 
-                // Poll the JoinHandle<O>
-               // Some(result) = self.join_handle => {
-                    // this is normal termination of the task returning result: O
-                    // HAPPY PATH :D
+                    // Poll the JoinHandle<O>
+                   result = &mut handle => {
+                        // this is normal termination of the task returning result: O
+                        // HAPPY PATH :D
 
-                //    break
-                //}
+                        break
+                    }
 
-                _ = signal::ctrl_c() => {
-                    self.terminate().await?;
-                    break
+
                 }
             }
+            Ok(())
+        } else {
+            // this has been called before initialization!!!
+            todo!()
         }
-        Ok(())
     }
 
     // Implementation notes:
@@ -135,16 +137,26 @@ impl<M: Manageable + Send + Clone> Component<M> {
         Ok(())
     }
 
-    pub async fn terminate(self) -> Result<(), std::io::Error> {
+    const GRACE_TIMEOUT: Duration = Duration::from_secs(10);
+
+    pub async fn terminate(self) -> Result<(), anyhow::Error> {
         self.shutdown_signal.send(()).unwrap();
 
-        if let Some(handle) = self.join_handle {
+        if let Some(mut handle) = self.join_handle {
             // TODO : *poll* (rather than join) the handle for completion for 2s (pool is non-consuming)
             // and then abort
-
-            //if let Err(_) = timeout(Duration::from_secs(2), handle).await {
-            handle.abort();
-            //}
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(Self::GRACE_TIMEOUT) =>{
+                        println!("did not receive completion within {:?} s", Self::GRACE_TIMEOUT);
+                        handle.abort();
+                        break
+                    }
+                    result = &mut handle => {
+                        break
+                    }
+                }
+            }
         } else {
             // this has been called before initialization!!!
             todo!()

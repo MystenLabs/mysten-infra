@@ -1,4 +1,4 @@
-use crate::{run_supervision, spawn, IrrecoverableError, Manageable};
+use crate::{IrrecoverableError, Manageable};
 
 use async_trait::async_trait;
 use futures::future;
@@ -15,29 +15,31 @@ pub struct ComponentTypeA {}
 impl Manageable for ComponentTypeA {
     async fn start(
         &self,
-        panic_signal: Sender<IrrecoverableError>,
-        shutdown_signal: oneshotReceiver<()>,
-    ) -> () {
-        match something_that_must_happen() {
-            Ok(..) => {}
-            Err(error) => {
-                panic_signal.send(error).await;
-            }
-        };
+        tx_irrecoverable: Sender<anyhow::Error>,
+        rx_cancelllation: oneshotReceiver<()>,
+    ) -> tokio::task::JoinHandle<()> {
+        let handle = tokio::spawn(something_that_must_happen(
+            tx_irrecoverable,
+            rx_cancelllation,
+        ));
 
-        loop {
-            tokio::select! {
-                _ = shutdown_signal => {
-                    return Ok(());
-                }
-                // usual case goes here, ie TCP listener, etc.
-            }
-        }
+        handle
+    }
+
+    async fn handle_irrecoverable(
+        &self,
+        irrecoverable: IrrecoverableError,
+    ) -> Result<(), anyhow::Error> {
+        todo!()
     }
 }
 
-pub fn something_that_must_happen() -> Result<(), std::io::Error> {
-    return Ok(());
+pub async fn something_that_must_happen(
+    tx_irrecoverable: Sender<anyhow::Error>,
+    rx_cancelllation: oneshotReceiver<()>,
+) {
+    // using cancellation handle and irrecoverable sender goes here
+    return;
 }
 
 #[tokio::main]
