@@ -48,7 +48,7 @@ impl<M: Manageable + Send + Clone> Component<M> {
     }
 
     // actually calls th launcher & stores the join handle
-    async fn spawn(&mut self, starter: M) -> Result<(), anyhow::Error> {
+    async fn spawn(mut self, starter: M) -> Result<(), anyhow::Error> {
         let (panic_sender, panic_receiver) = channel(10);
         let (cancel_sender, cancel_receiver) = oneshotChannel();
 
@@ -80,8 +80,6 @@ impl<M: Manageable + Send + Clone> Component<M> {
         // ctrl + c signal => send shutdown signal
         //
 
-        let mut should_restart = false;
-
         loop {
             tokio::select! {
                 Some(message) = self.panic_signal.recv() => {
@@ -101,10 +99,6 @@ impl<M: Manageable + Send + Clone> Component<M> {
                     self.shutdown_signal = cancel_sender;
                     self.join_handle = Some(wrapped_handle);
 
-                    should_restart = true;
-                    // this will blow the stack
-                    self.run().await?;
-
                 }
 
                 // Poll the JoinHandle<O>
@@ -121,11 +115,7 @@ impl<M: Manageable + Send + Clone> Component<M> {
                 }
             }
         }
-        if should_restart {
-            self.run().await
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
     // Implementation notes:
