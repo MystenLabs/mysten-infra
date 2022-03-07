@@ -1,43 +1,82 @@
-use crate::{Manageable, IrrecoverableError, spawn, run_supervision};
+use crate::{IrrecoverableError, Manageable, Supervisor};
 
-use futures::future;
-use futures::stream::FuturesUnordered;
-use tokio::{sync::mpsc::{channel, Sender, Receiver}};
-use tokio::sync::oneshot::{channel as oneshotChannel, Sender as oneshotSender, Receiver as oneshotReceiver};
+use anyhow::anyhow;
+use async_trait::async_trait;
+use std::net::TcpStream;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot::Receiver as oneshotReceiver;
 
-#[derive(Copy, Clone)]
-pub struct ComponentTypeA {}
+pub struct Stream {
+    stream: TcpStream
+}
 
-impl Manageable for ComponentTypeA {
-    fn start(&self, panic_signal: Sender<IrrecoverableError>, shutdown_signal: oneshotReceiver<()>) -> future::BoxFuture<'static, ()> {
-        match something_that_must_happen() {
-            Ok(..) => {}
-            Err(error) => {
-                panic_signal.send(error).await;
-            }
-        };
+impl Stream {
+    pub fn new() -> Self {
+        let stream = TcpStream::connect("127.0.0.1:6379").unwrap();
+        Stream { stream }
+    }
 
-        loop {
-            tokio::select! {
-                _ = shutdown_signal => {
-                    return Ok(());
+    pub async fn listen(
+        self,
+        tx_irrecoverable: Sender<anyhow::Error>,
+        rx_cancellation: oneshotReceiver<()>,
+    ) {
+        tokio::select! {
+            _ = async {
+                loop {
+                    let mut buf = [0; 10];
+                    let len = match self.stream.peek(&mut buf) {
+                        Ok(_) => println!("reading from stream"), // process
+                        Err(_) => {
+                            let e = anyhow!("missing something required");
+                            tx_irrecoverable.send(e).await;
+                        }
+                    } ;
                 }
-                // usual case goes here, ie TCP listener, etc.
+
+            } => {}
+            _ = rx_cancellation => {
+                println!("terminating accept loop");
             }
         }
     }
 }
 
-pub fn something_that_must_happen() -> Result<(), std::io::Error> {
-    return Ok(())
+#[async_trait]
+impl Manageable for Stream {
+    async fn start(
+        &self,
+        tx_irrecoverable: Sender<anyhow::Error>,
+        rx_cancelllation: oneshotReceiver<()>,
+    ) -> tokio::task::JoinHandle<()> {
+
+        let handle = tokio::spawn(self.listen(
+            tx_irrecoverable,
+            rx_cancelllation,
+        ));
+
+        handle
+    }
+
+    async fn handle_irrecoverable(
+        &self,
+        irrecoverable: IrrecoverableError,
+    ) -> Result<(), anyhow::Error> {
+        println!("Received irrecoverable error {}", irrecoverable);
+        Ok(())
+    }
+}
+
+
+impl Clone for Stream {
+    fn clone(&self) -> Self {
+        Stream::new()
+    }
 }
 
 #[tokio::main]
 async fn main() {
-    let mut handles = Vec::new();
-    let a = ComponentTypeA {};
-    let componentManager = spawn(a);
-    handles.push(run_supervision(componentManager).await);
-
-    future::join_all(handles).await;
+    let stream = Stream::new();
+    let supervisor = Supervisor::new(stream);
+    supervisor.spawn().await;
 }

@@ -1,85 +1,142 @@
 mod example;
 
-use futures::future;
-use tokio::signal;
-use tokio::{sync::mpsc::{channel, Sender, Receiver}};
-use tokio::sync::oneshot::{channel as oneshotChannel, Sender as oneshotSender, Receiver as oneshotReceiver};
-use tokio::time::{Duration, timeout};
+use anyhow::anyhow;
+use async_trait::async_trait;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::oneshot::{
+    channel as oneshotChannel, Receiver as oneshotReceiver, Sender as oneshotSender,
+};
+use tokio::time::Duration;
 
+type IrrecoverableError = anyhow::Error;
+type JoinHandle = tokio::task::JoinHandle<()>;
 
-type IrrecoverableError = std::io::Error;
-type TokioJoinHande = tokio::task::JoinHandle<()>;
-
+// The User defines a task launcher, that takes:
+// - an irrecoverable error sender, on which IrrecoverableError is signaled in the task
+// - a cancellation handle, which will be listened to in the task
+// it then equips the task with those, launches it and returns the JoinHandle
+#[async_trait]
 pub trait Manageable {
-    fn start(&self, _: Sender<IrrecoverableError>, _: oneshotReceiver<()>) -> future::BoxFuture<'static, ()>;
+    // The API for the task launcher
+    async fn start(
+        &self,
+        tx_irrecoverable: Sender<anyhow::Error>,
+        rx_cancellation: oneshotReceiver<()>,
+    ) -> tokio::task::JoinHandle<()>; // Not the task is "silent" (returns nothing) and does its work through side effects
 
+    // The API for cleanup after the task has encountered an irrecoverable error
+    async fn handle_irrecoverable(
+        &self,
+        irrecoverable: IrrecoverableError,
+    ) -> Result<(), anyhow::Error>;
 }
 
-pub struct Component {
-    shutdown_signal: oneshotSender<()>,
-    panic_signal: Receiver<IrrecoverableError>,
-    join_handle: TokioJoinHande,
-    start_fn : Box<dyn Manageable>,
+pub struct Supervisor<M: Manageable> {
+    cancellation_signal: Option<oneshotSender<()>>,
+    irrecoverable_signal: Receiver<IrrecoverableError>,
+    join_handle: Option<JoinHandle>,
+    manageable: M,
 }
 
-impl Component{
-    pub async fn join(self) -> Result<(), std::io::Error> {
-        self.join_handle.await?;
-        Ok(())
+impl<M: Manageable + Send + Clone> Supervisor<M> {
+    pub fn new(component: M) -> Self {
+        // initialize start_fn
+        // optionally, initialize the shutdown signal, the panic signal,
+        // initialize join_handle to None
+        let (_, tr_irrecoverable) = channel(10);
+        let (tx_cancellation, _) = oneshotChannel();
+        Supervisor {
+            cancellation_signal: Some(tx_cancellation),
+            irrecoverable_signal: tr_irrecoverable,
+            join_handle: None,
+            manageable: component,
+        }
     }
-}
 
+    // calls th launcher & stores the join handle
+    async fn spawn(mut self) -> Result<(), anyhow::Error> {
+        let (tx_irrecoverable, tr_irrecoverable) = channel(10);
+        let (tx_cancellation, tr_cancellation) = oneshotChannel();
 
-pub fn spawn<M>(starter: M) -> Component
-where M: Manageable + Send + Copy + 'static
-{
-    let (panic_sender, panic_receiver) = channel(10);
-    let (cancel_sender, cancel_receiver) = oneshotChannel();
-    let wrapped_handle = tokio::spawn( starter.start(panic_sender, cancel_receiver));
-    Component{panic_signal: panic_receiver,
-        shutdown_signal: cancel_sender,
-        join_handle: wrapped_handle,
-        start_fn: Box::new(starter),
+        // this assumes the start_fn is populated
+        let wrapped_handle = self
+            .manageable
+            .start(tx_irrecoverable, tr_cancellation)
+            .await;
+
+        self.irrecoverable_signal = tr_irrecoverable;
+        self.cancellation_signal = Some(tx_cancellation);
+        self.join_handle = Some(wrapped_handle);
+
+        self.run().await
     }
-}
 
-pub async fn run_supervision(mut c: Component) ->Result<(), std::io::Error> {
-    // first, call join to start the future
-    //
-    // select statement that listens for the following cases:
-    // panic signal incoming => log, terminate and restart
-    // ctrl + c signal => send shutdown signal
-    //
-    c.join_handle.await;
+    // Run supervision of the child task
+    async fn run(&mut self) -> Result<(), anyhow::Error> {
+        // select statement that listens for the following cases:
+        //
+        // Irrecoverable signal incoming => log, terminate and restart
+        // completion of the task => we're done! return
+        loop {
+            tokio::select! {
+                Some(message) = self.irrecoverable_signal.recv() => {
+                    self.manageable.handle_irrecoverable(message).await;
+                    self.terminate().await?;
 
-    loop {
-        tokio::select! {
-            message = c.panic_signal.recv() => {
-                println!("panic message received: {:?}", message);
-                terminate(c.shutdown_signal, c.join_handle).await?;
-                // restart
-                let (panic_sender, panic_receiver) = channel(10);
-                let (cancel_sender, cancel_receiver) = oneshotChannel();
-                let wrapped_handle = tokio::spawn(c.start_fn.start(panic_sender, cancel_receiver));
-                c.panic_signal = panic_receiver;
-                c.shutdown_signal = cancel_sender;
-                c.join_handle = wrapped_handle;
-            }
+                    // restart
+                    let (panic_sender, panic_receiver) = channel(10);
+                    let (cancel_sender, cancel_receiver) = oneshotChannel();
 
+                    // call the launcher
+                    let wrapped_handle: tokio::task::JoinHandle<()> =  self.manageable.start(panic_sender, cancel_receiver).await;
 
-            _ = signal::ctrl_c() => {
-                terminate(c.shutdown_signal, c.join_handle).await?;
-                return Ok(())
+                    // reset the supervision handles & channel end points
+                    self.irrecoverable_signal = panic_receiver;
+                    self.cancellation_signal = Some(cancel_sender);
+                    self.join_handle = Some(wrapped_handle);
+
+                },
+
+               // Poll the JoinHandle<O>
+               _result =  self.join_handle.as_mut().unwrap(), if self.join_handle.is_some() => {
+                    // this is normal termination of the task returning result: O
+                    // HAPPY PATH :D
+                    return Ok(())
+                }
             }
         }
     }
-}
 
-pub async fn terminate(shutdown_sender: oneshotSender<()>, mut join_handle: TokioJoinHande) -> Result<(), std::io::Error> {
-    shutdown_sender.send(()).unwrap();
+    const GRACE_TIMEOUT: Duration = Duration::from_secs(2);
 
-    if let Err(_) = timeout(Duration::from_secs(2), &mut join_handle).await {
-        join_handle.abort();
+    async fn terminate(&mut self) -> Result<(), anyhow::Error> {
+        self.cancellation_signal
+            .take() // replaces cancellation_signal with None
+            .expect("Internal component invariant broken: cancellation signal sender already used")
+            .send(())
+            .unwrap();
+
+        // poll (rather than join) the handle for completion for 2s (poll is non-consuming)
+        // and then abort
+        if let Some(ref mut handle) = self.join_handle {
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(Self::GRACE_TIMEOUT) => {
+                        println!("did not receive completion within {:?} s", Self::GRACE_TIMEOUT);
+                        self.join_handle.as_ref().unwrap().abort();
+                        break;
+                    }
+                    _result = handle => {
+                        break;
+                    }
+                }
+            }
+            Ok(())
+        } else {
+            // this has been called before initialization
+            return Err(anyhow!(
+                "Component has not yet been launched, cannot terminate."
+            ));
+        }
     }
-    Ok(())
 }
