@@ -1,5 +1,6 @@
 mod example;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::future;
 use tokio::signal;
@@ -36,27 +37,34 @@ pub struct Component<M: Manageable> {
     shutdown_signal: oneshotSender<()>,
     panic_signal: Receiver<IrrecoverableError>,
     join_handle: Option<TokioJoinHandle>,
-    start_fn: M,
+    manageable: M,
 }
 
 impl<M: Manageable + Send + Clone> Component<M> {
-    pub fn new<Mg: Manageable>(launcher: Mg) -> Self {
+    pub fn new(launcher: M) -> Self {
         // initialize start_fn
         // optionally, initialize the shutdown signal, the panic signal,
         // initialize join_handle to None
-        todo!()
+        let (_, tr_panic) = channel(10);
+        let (tx_shutdown, _) = oneshotChannel();
+        Component{
+            shutdown_signal: tx_shutdown,
+            panic_signal: tr_panic,
+            join_handle: None,
+            manageable: launcher
+        }
     }
 
-    // actually calls th launcher & stores the join handle
-    async fn spawn(mut self, starter: M) -> Result<(), anyhow::Error> {
-        let (panic_sender, panic_receiver) = channel(10);
-        let (cancel_sender, cancel_receiver) = oneshotChannel();
+    // calls th launcher & stores the join handle
+    async fn spawn(mut self) -> Result<(), anyhow::Error> {
+        let (tx_panic, tr_panic) = channel(10);
+        let (tx_shutdown, tr_shutdown) = oneshotChannel();
 
         // this assumes the start_fn is populated
-        let wrapped_handle = starter.start(panic_sender, cancel_receiver).await;
+        let wrapped_handle = self.manageable.start(tx_panic, tr_shutdown).await;
 
-        self.panic_signal = panic_receiver;
-        self.shutdown_signal = cancel_sender;
+        self.panic_signal = tr_panic;
+        self.shutdown_signal = tx_shutdown;
         self.join_handle = Some(wrapped_handle);
 
         // we're ourselves a component
@@ -66,19 +74,13 @@ impl<M: Manageable + Send + Clone> Component<M> {
     // Run supervision of the child task
     async fn run(mut self) -> Result<(), anyhow::Error> {
         // TODO : how does this conflict with join ? Do we still want join?
-        // TODO : terminate is public .. does that make sense ?
-        // TODO : there's a lot in common between
-        //  -> new () which sets up the launcher we want to dedicate ourselves to
-        // -> spawn() which sets up the supervision, and launches the task
-        // -> restart () which cleans up (optionally as defined by the user), re-sets up supervision, and launches the task
-
+        // I don't think we need to join, because we never expect these tasks to complete
+        // exception is on application shutdown, which theoretically should never happen.
+        //
         // select statement that listens for the following cases:
         //
         // panic signal incoming => log, terminate and restart
         // completion of the task => we're done! return
-        //
-        // ctrl + c signal => send shutdown signal
-        //
 
         if let Some(mut handle) = self.join_handle {
             loop {
@@ -86,27 +88,19 @@ impl<M: Manageable + Send + Clone> Component<M> {
                     Some(message) = self.panic_signal.recv() => {
 
                         println!("panic message received: {:?}", message.to_string());
-                        self.start_fn.handle_irrecoverable(message).await;
-                        // self.terminate().await?;
+                        self.manageable.handle_irrecoverable(message).await;
+                        self.terminate().await?;
 
-                        // restart
-                        // This is eerily similar to spawn
-                        let (panic_sender, panic_receiver) = channel(10);
-                        let (cancel_sender, cancel_receiver) = oneshotChannel();
-
-                        let wrapped_handle: tokio::task::JoinHandle<()> =  self.start_fn.start(panic_sender, cancel_receiver).await;
-
-                        self.panic_signal = panic_receiver;
-                        self.shutdown_signal = cancel_sender;
-                        self.join_handle = Some(wrapped_handle);
-
+                        // restart, continuous passing style
+                        let next_component = Component::new(self.manageable.clone());
+                        self = next_component;
+                        self.spawn();
                     }
 
-                    // Poll the JoinHandle<O>
+                   // Poll the JoinHandle<O>
                    result = &mut handle => {
                         // this is normal termination of the task returning result: O
                         // HAPPY PATH :D
-
                         break
                     }
 
@@ -115,35 +109,33 @@ impl<M: Manageable + Send + Clone> Component<M> {
             }
             Ok(())
         } else {
-            // this has been called before initialization!!!
-            todo!()
+            // this has been called before initialization
+            return Err(anyhow!(
+                "Component has not yet been launched, cannot run supervision."
+            ));
         }
     }
 
-    // Implementation notes:
-    // how do we periodically poll
-    // - the completion of the child task (join handle)?
-    // - the reception of an irrecoverable signal (self.panic_signal)?
-    // => then, how do we restart after cleanup?
-
     // Do we want to block the component on the customer's task?
-    pub async fn join(self) -> Result<(), std::io::Error> {
+    pub async fn join(self) -> Result<(), anyhow::Error> {
         if let Some(handle) = self.join_handle {
             handle.await;
         } else {
             // this has been called before initialization
-            todo!()
+            return Err(anyhow!(
+                "Component has not yet been launched, cannot join."
+            ));
         }
         Ok(())
     }
 
-    const GRACE_TIMEOUT: Duration = Duration::from_secs(10);
+    const GRACE_TIMEOUT: Duration = Duration::from_secs(2);
 
-    pub async fn terminate(self) -> Result<(), anyhow::Error> {
+    async fn terminate(self) -> Result<(), anyhow::Error> {
         self.shutdown_signal.send(()).unwrap();
 
         if let Some(mut handle) = self.join_handle {
-            // TODO : *poll* (rather than join) the handle for completion for 2s (pool is non-consuming)
+            // poll (rather than join) the handle for completion for 2s (poll is non-consuming)
             // and then abort
             loop {
                 tokio::select! {
@@ -158,8 +150,10 @@ impl<M: Manageable + Send + Clone> Component<M> {
                 }
             }
         } else {
-            // this has been called before initialization!!!
-            todo!()
+            // this has been called before initialization
+            return Err(anyhow!(
+                "Component has not yet been launched, cannot terminate."
+            ));
         }
 
         Ok(())

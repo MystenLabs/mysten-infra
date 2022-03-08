@@ -1,8 +1,6 @@
-use crate::{IrrecoverableError, Manageable};
+use crate::{IrrecoverableError, Manageable, Component};
 
 use async_trait::async_trait;
-use futures::future;
-use futures::stream::FuturesUnordered;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot::{
     channel as oneshotChannel, Receiver as oneshotReceiver, Sender as oneshotSender,
@@ -44,10 +42,9 @@ pub async fn something_that_must_happen(
 
 #[tokio::main]
 async fn main() {
-    let mut handles = Vec::new();
-    let a = ComponentTypeA {};
-    let componentManager = spawn(a);
-    handles.push(run_supervision(componentManager).await);
 
-    future::join_all(handles).await;
+    let a = ComponentTypeA {};
+    let component_manager = Component::new(a);
+    component_manager.spawn().await.unwrap();
+
 }
