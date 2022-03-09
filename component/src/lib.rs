@@ -38,7 +38,7 @@ pub struct Supervisor<M: Manageable> {
     manageable: M,
 }
 
-impl<M: Manageable + Send + Clone> Supervisor<M> {
+impl<M: Manageable + Send> Supervisor<M> {
     pub fn new(component: M) -> Self {
         // initialize start_fn
         // optionally, initialize the shutdown signal, the panic signal,
@@ -54,7 +54,7 @@ impl<M: Manageable + Send + Clone> Supervisor<M> {
     }
 
     // calls th launcher & stores the join handle
-    async fn spawn(mut self) -> Result<(), anyhow::Error> {
+    pub async fn spawn(mut self) -> Result<(), anyhow::Error> {
         let (tx_irrecoverable, tr_irrecoverable) = channel(10);
         let (tx_cancellation, tr_cancellation) = oneshotChannel();
 
@@ -72,7 +72,7 @@ impl<M: Manageable + Send + Clone> Supervisor<M> {
     }
 
     // Run supervision of the child task
-    async fn run(&mut self) -> Result<(), anyhow::Error> {
+    pub async fn run(&mut self) -> Result<(), anyhow::Error> {
         // select statement that listens for the following cases:
         //
         // Irrecoverable signal incoming => log, terminate and restart
@@ -80,7 +80,7 @@ impl<M: Manageable + Send + Clone> Supervisor<M> {
         loop {
             tokio::select! {
                 Some(message) = self.irrecoverable_signal.recv() => {
-                    self.manageable.handle_irrecoverable(message).await;
+                    self.manageable.handle_irrecoverable(message).await?;
                     self.terminate().await?;
 
                     // restart

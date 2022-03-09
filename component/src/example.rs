@@ -5,19 +5,13 @@ use async_trait::async_trait;
 use std::net::TcpStream;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver as oneshotReceiver;
+use tokio::task::JoinHandle;
 
-pub struct Stream {
-    stream: TcpStream
-}
+pub struct Stream {}
 
 impl Stream {
-    pub fn new() -> Self {
-        let stream = TcpStream::connect("127.0.0.1:6379").unwrap();
-        Stream { stream }
-    }
-
     pub async fn listen(
-        self,
+        stream: TcpStream,
         tx_irrecoverable: Sender<anyhow::Error>,
         rx_cancellation: oneshotReceiver<()>,
     ) {
@@ -25,11 +19,11 @@ impl Stream {
             _ = async {
                 loop {
                     let mut buf = [0; 10];
-                    let len = match self.stream.peek(&mut buf) {
+                    let _len = match stream.peek(&mut buf) {
                         Ok(_) => println!("reading from stream"), // process
                         Err(_) => {
                             let e = anyhow!("missing something required");
-                            tx_irrecoverable.send(e).await;
+                            tx_irrecoverable.send(e).await.expect("Could not send panic signal!🙀 ");
                         }
                     } ;
                 }
@@ -44,17 +38,15 @@ impl Stream {
 
 #[async_trait]
 impl Manageable for Stream {
+    #[allow(clippy::async_yields_async)]
     async fn start(
         &self,
         tx_irrecoverable: Sender<anyhow::Error>,
         rx_cancelllation: oneshotReceiver<()>,
     ) -> tokio::task::JoinHandle<()> {
-
-        let handle = tokio::spawn(self.listen(
-            tx_irrecoverable,
-            rx_cancelllation,
-        ));
-
+        let stream = TcpStream::connect("127.0.0.1:6379").unwrap();
+        let handle: JoinHandle<()> =
+            tokio::spawn(Self::listen(stream, tx_irrecoverable, rx_cancelllation));
         handle
     }
 
@@ -67,16 +59,10 @@ impl Manageable for Stream {
     }
 }
 
-
-impl Clone for Stream {
-    fn clone(&self) -> Self {
-        Stream::new()
-    }
-}
-
+// TODO: set that up as an Example http://xion.io/post/code/rust-examples.html
 #[tokio::main]
-async fn main() {
-    let stream = Stream::new();
+pub async fn main() {
+    let stream = Stream {};
     let supervisor = Supervisor::new(stream);
-    supervisor.spawn().await;
+    supervisor.spawn().await.unwrap();
 }
