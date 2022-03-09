@@ -211,13 +211,10 @@ impl DBBatch {
             return Err(TypedStoreError::CrossDBBatch);
         }
 
-        let config = bincode::DefaultOptions::new()
-            .with_big_endian()
-            .with_fixint_encoding();
         purged_vals
             .into_iter()
             .try_for_each::<_, Result<_, TypedStoreError>>(|k| {
-                let k_buf = config.serialize(k.borrow())?;
+                let k_buf = be_fix_int_ser(k.borrow())?;
                 self.batch.delete_cf(&db.cf(), k_buf);
 
                 Ok(())
@@ -236,11 +233,8 @@ impl DBBatch {
             return Err(TypedStoreError::CrossDBBatch);
         }
 
-        let config = bincode::DefaultOptions::new()
-            .with_big_endian()
-            .with_fixint_encoding();
-        let from_buf = config.serialize(from)?;
-        let to_buf = config.serialize(to)?;
+        let from_buf = be_fix_int_ser(from)?;
+        let to_buf = be_fix_int_ser(to)?;
 
         self.batch.delete_range_cf(&db.cf(), from_buf, to_buf);
         Ok(self)
@@ -256,13 +250,10 @@ impl DBBatch {
             return Err(TypedStoreError::CrossDBBatch);
         }
 
-        let config = bincode::DefaultOptions::new()
-            .with_big_endian()
-            .with_fixint_encoding();
         new_vals
             .into_iter()
             .try_for_each::<_, Result<_, TypedStoreError>>(|(k, v)| {
-                let k_buf = config.serialize(k.borrow())?;
+                let k_buf = be_fix_int_ser(k.borrow())?;
                 let v_buf = bincode::serialize(v.borrow())?;
                 self.batch.put_cf(&db.cf(), k_buf, v_buf);
                 Ok(())
@@ -286,11 +277,7 @@ where
     }
 
     fn get(&self, key: &K) -> Result<Option<V>, TypedStoreError> {
-        let config = bincode::DefaultOptions::new()
-            .with_big_endian()
-            .with_fixint_encoding();
-
-        let key_buf = config.serialize(key)?;
+        let key_buf = be_fix_int_ser(key)?;
         let res = self.rocksdb.get_pinned_cf(&self.cf(), &key_buf)?;
         match res {
             Some(data) => Ok(Some(bincode::deserialize(&data)?)),
@@ -299,11 +286,7 @@ where
     }
 
     fn insert(&self, key: &K, value: &V) -> Result<(), TypedStoreError> {
-        let config = bincode::DefaultOptions::new()
-            .with_big_endian()
-            .with_fixint_encoding();
-
-        let key_buf = config.serialize(key)?;
+        let key_buf = be_fix_int_ser(key)?;
         let value_buf = bincode::serialize(value)?;
 
         let _ = self.rocksdb.put_cf(&self.cf(), &key_buf, &value_buf)?;
@@ -311,10 +294,7 @@ where
     }
 
     fn remove(&self, key: &K) -> Result<(), TypedStoreError> {
-        let config = bincode::DefaultOptions::new()
-            .with_big_endian()
-            .with_fixint_encoding();
-        let key_buf = config.serialize(key)?;
+        let key_buf = be_fix_int_ser(key)?;
 
         let _ = self.rocksdb.delete_cf(&self.cf(), &key_buf)?;
         Ok(())
@@ -354,16 +334,10 @@ where
 
     /// Returns a vector of values corresponding to the keys provided.
     fn multi_get(&self, keys: &[K]) -> Result<Vec<Option<V>>, TypedStoreError> {
-        let config = bincode::DefaultOptions::new()
-            .with_big_endian()
-            .with_fixint_encoding();
-
         let cf = self.cf();
 
-        let keys_bytes: Result<Vec<_>, TypedStoreError> = keys
-            .iter()
-            .map(|k| Ok((&cf, config.serialize(k)?)))
-            .collect();
+        let keys_bytes: Result<Vec<_>, TypedStoreError> =
+            keys.iter().map(|k| Ok((&cf, be_fix_int_ser(k)?))).collect();
 
         let results = self.rocksdb.multi_get_cf(keys_bytes?);
 
@@ -450,4 +424,17 @@ pub fn open_cf<P: AsRef<Path>>(
         )?)
     };
     Ok(rocksdb)
+}
+
+/// TODO: Good description of why we're doing this
+#[inline(always)]
+pub fn be_fix_int_ser<S>(t: &S) -> Result<Vec<u8>, TypedStoreError>
+where
+    S: ?Sized + serde::Serialize,
+{
+    bincode::DefaultOptions::new()
+        .with_big_endian()
+        .with_fixint_encoding()
+        .serialize(t)
+        .map_err(|e| e.into())
 }
