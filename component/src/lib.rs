@@ -72,46 +72,38 @@ impl<M: Manageable + Send + Clone> Supervisor<M> {
     }
 
     // Run supervision of the child task
-    async fn run(mut self) -> Result<(), anyhow::Error> {
+    async fn run(&mut self) -> Result<(), anyhow::Error> {
         // select statement that listens for the following cases:
         //
         // Irrecoverable signal incoming => log, terminate and restart
         // completion of the task => we're done! return
+        loop {
+            tokio::select! {
+                Some(message) = self.irrecoverable_signal.recv() => {
+                    self.manageable.handle_irrecoverable(message).await;
+                    self.terminate().await?;
 
-        if let Some(mut handle) = self.join_handle {
-            loop {
-                tokio::select! {
-                    Some(message) = self.irrecoverable_signal.recv() => {
-                        self.manageable.handle_irrecoverable(message).await;
-                        self.terminate().await?;
+                    // restart
+                    let (panic_sender, panic_receiver) = channel(10);
+                    let (cancel_sender, cancel_receiver) = oneshotChannel();
 
-                        // restart
-                        let (panic_sender, panic_receiver) = channel(10);
-                        let (cancel_sender, cancel_receiver) = oneshotChannel();
+                    // call the launcher
+                    let wrapped_handle: tokio::task::JoinHandle<()> =  self.manageable.start(panic_sender, cancel_receiver).await;
 
-                        // call the launcher
-                        let wrapped_handle: tokio::task::JoinHandle<()> =  self.manageable.start(panic_sender, cancel_receiver).await;
+                    // reset the supervision handles & channel end points
+                    self.irrecoverable_signal = panic_receiver;
+                    self.cancellation_signal = Some(cancel_sender);
+                    self.join_handle = Some(wrapped_handle);
 
-                        // reset the supervision handles & channel end points
-                        self.irrecoverable_signal = panic_receiver;
-                        self.cancellation_signal = Some(cancel_sender);
-                        self.join_handle = Some(wrapped_handle);
+                },
 
-                    },
-
-                   // Poll the JoinHandle<O>
-                   result = &mut handle => {
-                        // this is normal termination of the task returning result: O
-                        // HAPPY PATH :D
-                        return Ok(())
-                    },
+               // Poll the JoinHandle<O>
+               _result =  self.join_handle.as_mut().unwrap(), if self.join_handle.is_some() => {
+                    // this is normal termination of the task returning result: O
+                    // HAPPY PATH :D
+                    return Ok(())
                 }
             }
-        } else {
-            // this has been called before initialization
-            return Err(anyhow!(
-                "Component has not yet been launched, cannot run supervision."
-            ));
         }
     }
 
@@ -134,7 +126,7 @@ impl<M: Manageable + Send + Clone> Supervisor<M> {
                         self.join_handle.as_ref().unwrap().abort();
                         break;
                     }
-                    result = handle => {
+                    _result = handle => {
                         break;
                     }
                 }
