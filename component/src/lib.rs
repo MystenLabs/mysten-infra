@@ -2,16 +2,14 @@ mod example;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use futures::future;
-use tokio::signal;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot::{
     channel as oneshotChannel, Receiver as oneshotReceiver, Sender as oneshotSender,
 };
-use tokio::time::{timeout, Duration};
+use tokio::time::Duration;
 
 type IrrecoverableError = anyhow::Error;
-type TokioJoinHandle = tokio::task::JoinHandle<()>;
+type JoinHandle = tokio::task::JoinHandle<()>;
 
 // The User defines a task launcher, that takes:
 // - an irrecoverable error sender, on which IrrecoverableError is signaled in the task
@@ -23,7 +21,7 @@ pub trait Manageable {
     async fn start(
         &self,
         tx_irrecoverable: Sender<anyhow::Error>,
-        rx_cancelllation: oneshotReceiver<()>,
+        rx_cancellation: oneshotReceiver<()>,
     ) -> tokio::task::JoinHandle<()>; // Not the task is "silent" (returns nothing) and does its work through side effects
 
     // The API for cleanup after the task has encountered an irrecoverable error
@@ -33,81 +31,82 @@ pub trait Manageable {
     ) -> Result<(), anyhow::Error>;
 }
 
-pub struct Component<M: Manageable> {
-    shutdown_signal: oneshotSender<()>,
-    panic_signal: Receiver<IrrecoverableError>,
-    join_handle: Option<TokioJoinHandle>,
+pub struct Supervisor<M: Manageable> {
+    cancellation_signal: oneshotSender<()>,
+    irrecoverable_signal: Receiver<IrrecoverableError>,
+    join_handle: Option<JoinHandle>,
     manageable: M,
 }
 
-impl<M: Manageable + Send + Clone> Component<M> {
-    pub fn new(launcher: M) -> Self {
+impl<M: Manageable + Send + Clone> Supervisor<M> {
+    pub fn new(component: M) -> Self {
         // initialize start_fn
         // optionally, initialize the shutdown signal, the panic signal,
         // initialize join_handle to None
-        let (_, tr_panic) = channel(10);
-        let (tx_shutdown, _) = oneshotChannel();
-        Component{
-            shutdown_signal: tx_shutdown,
-            panic_signal: tr_panic,
+        let (_, tr_irrecoverable) = channel(10);
+        let (tx_cancellation, _) = oneshotChannel();
+        Supervisor {
+            cancellation_signal: tx_cancellation,
+            irrecoverable_signal: tr_irrecoverable,
             join_handle: None,
-            manageable: launcher
+            manageable: component
         }
     }
 
     // calls th launcher & stores the join handle
     async fn spawn(mut self) -> Result<(), anyhow::Error> {
-        let (tx_panic, tr_panic) = channel(10);
-        let (tx_shutdown, tr_shutdown) = oneshotChannel();
+        let (tx_irrecoverable, tr_irrecoverable) = channel(10);
+        let (tx_cancellation, tr_cancellation) = oneshotChannel();
 
         // this assumes the start_fn is populated
-        let wrapped_handle = self.manageable.start(tx_panic, tr_shutdown).await;
+        let wrapped_handle = self.manageable.start(tx_irrecoverable, tr_cancellation).await;
 
-        self.panic_signal = tr_panic;
-        self.shutdown_signal = tx_shutdown;
+        self.irrecoverable_signal = tr_irrecoverable;
+        self.cancellation_signal = tx_cancellation;
         self.join_handle = Some(wrapped_handle);
 
-        // we're ourselves a component
         self.run().await
     }
 
     // Run supervision of the child task
     async fn run(mut self) -> Result<(), anyhow::Error> {
-        // TODO : how does this conflict with join ? Do we still want join?
-        // I don't think we need to join, because we never expect these tasks to complete
-        // exception is on application shutdown, which theoretically should never happen.
-        //
         // select statement that listens for the following cases:
         //
-        // panic signal incoming => log, terminate and restart
+        // Irrecoverable signal incoming => log, terminate and restart
         // completion of the task => we're done! return
 
         if let Some(mut handle) = self.join_handle {
             loop {
                 tokio::select! {
-                    Some(message) = self.panic_signal.recv() => {
+                    Some(message) = self.irrecoverable_signal.recv() => {
 
-                        println!("panic message received: {:?}", message.to_string());
                         self.manageable.handle_irrecoverable(message).await;
                         self.terminate().await?;
 
-                        // restart, continuous passing style
-                        let next_component = Component::new(self.manageable.clone());
-                        self = next_component;
-                        self.spawn();
+                        // restart
+                        let (panic_sender, panic_receiver) = channel(10);
+                        let (cancel_sender, cancel_receiver) = oneshotChannel();
+
+                        let wrapped_handle: tokio::task::JoinHandle<()> =  self.manageable.start(panic_sender, cancel_receiver).await;
+
+                        self.irrecoverable_signal = panic_receiver;
+                        self.cancellation_signal = cancel_sender;
+                        self.join_handle = Some(wrapped_handle);
+
+                        // // restart, continuous passing style
+                        // let next_component = Supervisor::new(self.manageable.clone());
+                        // self = next_component;
+                        // self.spawn().await;
                     }
 
                    // Poll the JoinHandle<O>
-                   result = &mut handle => {
+                   result = mut handle => {
                         // this is normal termination of the task returning result: O
                         // HAPPY PATH :D
-                        break
+                        return Ok(())
                     }
-
-
                 }
             }
-            Ok(())
         } else {
             // this has been called before initialization
             return Err(anyhow!(
@@ -116,38 +115,26 @@ impl<M: Manageable + Send + Clone> Component<M> {
         }
     }
 
-    // Do we want to block the component on the customer's task?
-    pub async fn join(self) -> Result<(), anyhow::Error> {
-        if let Some(handle) = self.join_handle {
-            handle.await;
-        } else {
-            // this has been called before initialization
-            return Err(anyhow!(
-                "Component has not yet been launched, cannot join."
-            ));
-        }
-        Ok(())
-    }
-
     const GRACE_TIMEOUT: Duration = Duration::from_secs(2);
 
-    async fn terminate(self) -> Result<(), anyhow::Error> {
-        self.shutdown_signal.send(()).unwrap();
+    async fn terminate(mut self) -> Result<(), anyhow::Error> {
+        self.cancellation_signal.send(()).unwrap();
 
+
+        // poll (rather than join) the handle for completion for 2s (poll is non-consuming)
+        // and then abort
         if let Some(mut handle) = self.join_handle {
-            // poll (rather than join) the handle for completion for 2s (poll is non-consuming)
-            // and then abort
             loop {
                 tokio::select! {
-                    _ = tokio::time::sleep(Self::GRACE_TIMEOUT) =>{
-                        println!("did not receive completion within {:?} s", Self::GRACE_TIMEOUT);
-                        handle.abort();
-                        break
-                    }
-                    result = &mut handle => {
-                        break
-                    }
+                _ = tokio::time::sleep(Self::GRACE_TIMEOUT) =>{
+                    println!("did not receive completion within {:?} s", Self::GRACE_TIMEOUT);
+                    self.join_handle.as_ref().unwrap().abort();
+                    break
                 }
+                result = mut handle => {
+                    break
+                }
+            }
             }
         } else {
             // this has been called before initialization
@@ -155,7 +142,5 @@ impl<M: Manageable + Send + Clone> Component<M> {
                 "Component has not yet been launched, cannot terminate."
             ));
         }
-
-        Ok(())
     }
 }
