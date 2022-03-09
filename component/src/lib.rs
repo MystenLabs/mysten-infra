@@ -32,7 +32,7 @@ pub trait Manageable {
 }
 
 pub struct Supervisor<M: Manageable> {
-    cancellation_signal: oneshotSender<()>,
+    cancellation_signal: Option<oneshotSender<()>>,
     irrecoverable_signal: Receiver<IrrecoverableError>,
     join_handle: Option<JoinHandle>,
     manageable: M,
@@ -46,10 +46,10 @@ impl<M: Manageable + Send + Clone> Supervisor<M> {
         let (_, tr_irrecoverable) = channel(10);
         let (tx_cancellation, _) = oneshotChannel();
         Supervisor {
-            cancellation_signal: tx_cancellation,
+            cancellation_signal: Some(tx_cancellation),
             irrecoverable_signal: tr_irrecoverable,
             join_handle: None,
-            manageable: component
+            manageable: component,
         }
     }
 
@@ -59,10 +59,13 @@ impl<M: Manageable + Send + Clone> Supervisor<M> {
         let (tx_cancellation, tr_cancellation) = oneshotChannel();
 
         // this assumes the start_fn is populated
-        let wrapped_handle = self.manageable.start(tx_irrecoverable, tr_cancellation).await;
+        let wrapped_handle = self
+            .manageable
+            .start(tx_irrecoverable, tr_cancellation)
+            .await;
 
         self.irrecoverable_signal = tr_irrecoverable;
-        self.cancellation_signal = tx_cancellation;
+        self.cancellation_signal = Some(tx_cancellation);
         self.join_handle = Some(wrapped_handle);
 
         self.run().await
@@ -79,7 +82,6 @@ impl<M: Manageable + Send + Clone> Supervisor<M> {
             loop {
                 tokio::select! {
                     Some(message) = self.irrecoverable_signal.recv() => {
-
                         self.manageable.handle_irrecoverable(message).await;
                         self.terminate().await?;
 
@@ -87,24 +89,22 @@ impl<M: Manageable + Send + Clone> Supervisor<M> {
                         let (panic_sender, panic_receiver) = channel(10);
                         let (cancel_sender, cancel_receiver) = oneshotChannel();
 
+                        // call the launcher
                         let wrapped_handle: tokio::task::JoinHandle<()> =  self.manageable.start(panic_sender, cancel_receiver).await;
 
+                        // reset the supervision handles & channel end points
                         self.irrecoverable_signal = panic_receiver;
-                        self.cancellation_signal = cancel_sender;
+                        self.cancellation_signal = Some(cancel_sender);
                         self.join_handle = Some(wrapped_handle);
 
-                        // // restart, continuous passing style
-                        // let next_component = Supervisor::new(self.manageable.clone());
-                        // self = next_component;
-                        // self.spawn().await;
-                    }
+                    },
 
                    // Poll the JoinHandle<O>
-                   result = mut handle => {
+                   result = &mut handle => {
                         // this is normal termination of the task returning result: O
                         // HAPPY PATH :D
                         return Ok(())
-                    }
+                    },
                 }
             }
         } else {
@@ -117,25 +117,29 @@ impl<M: Manageable + Send + Clone> Supervisor<M> {
 
     const GRACE_TIMEOUT: Duration = Duration::from_secs(2);
 
-    async fn terminate(mut self) -> Result<(), anyhow::Error> {
-        self.cancellation_signal.send(()).unwrap();
-
+    async fn terminate(&mut self) -> Result<(), anyhow::Error> {
+        self.cancellation_signal
+            .take() // replaces cancellation_signal with None
+            .expect("Internal component invariant broken: cancellation signal sender already used")
+            .send(())
+            .unwrap();
 
         // poll (rather than join) the handle for completion for 2s (poll is non-consuming)
         // and then abort
-        if let Some(mut handle) = self.join_handle {
+        if let Some(ref mut handle) = self.join_handle {
             loop {
                 tokio::select! {
-                _ = tokio::time::sleep(Self::GRACE_TIMEOUT) =>{
-                    println!("did not receive completion within {:?} s", Self::GRACE_TIMEOUT);
-                    self.join_handle.as_ref().unwrap().abort();
-                    break
-                }
-                result = mut handle => {
-                    break
+                    _ = tokio::time::sleep(Self::GRACE_TIMEOUT) => {
+                        println!("did not receive completion within {:?} s", Self::GRACE_TIMEOUT);
+                        self.join_handle.as_ref().unwrap().abort();
+                        break;
+                    }
+                    result = handle => {
+                        break;
+                    }
                 }
             }
-            }
+            Ok(())
         } else {
             // this has been called before initialization
             return Err(anyhow!(
