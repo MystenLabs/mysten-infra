@@ -5,7 +5,7 @@ use bincode::Options;
 use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
 
-use super::{DBRawIteratorMultiThreaded, TypedStoreError};
+use super::{be_fix_int_ser, DBRawIteratorMultiThreaded, TypedStoreError};
 
 /// An iterator over the keys of a prefix.
 pub struct Keys<'a, K> {
@@ -45,10 +45,7 @@ impl<'a, K: Serialize> Keys<'a, K> {
     /// and either lands on the key or the first one greater than
     /// the key.
     pub fn skip_to(mut self, key: &K) -> Result<Self, TypedStoreError> {
-        let config = bincode::DefaultOptions::new()
-            .with_big_endian()
-            .with_fixint_encoding();
-        self.db_iter.seek(config.serialize(key)?);
+        self.db_iter.seek(be_fix_int_ser(key)?);
         Ok(self)
     }
 
@@ -56,10 +53,7 @@ impl<'a, K: Serialize> Keys<'a, K> {
     /// the one prior to it if it does not exist. If there is
     /// no element prior to it, it returns an empty iterator.
     pub fn skip_prior_to(mut self, key: &K) -> Result<Self, TypedStoreError> {
-        let config = bincode::DefaultOptions::new()
-            .with_big_endian()
-            .with_fixint_encoding();
-        self.db_iter.seek_for_prev(config.serialize(key)?);
+        self.db_iter.seek_for_prev(be_fix_int_ser(key)?);
         Ok(self)
     }
 
