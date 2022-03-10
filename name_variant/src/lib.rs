@@ -65,7 +65,7 @@ fn match_enum_to_string(name: &Ident, variants: &DataEnum) -> proc_macro2::Token
         let variant_string = variant_ident.to_string();
 
         match_arms.extend(quote! {
-            #name::#variant_ident #fields_in_variant => #variant_string.to_owned(),
+            #name::#variant_ident #fields_in_variant => #variant_string,
         });
     }
     match_arms
@@ -87,7 +87,7 @@ pub fn derive_named_variant(input: TokenStream) -> TokenStream {
             let variant_arms = match_enum_to_string(name, data_enum);
 
             variant_checker_functions.extend(quote_spanned! { name.span() =>
-                fn variant_name(&self) -> String {
+                const fn variant_name(&self) -> &'static str {
                     match self {
                         #variant_arms
                     }
