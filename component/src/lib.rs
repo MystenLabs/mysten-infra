@@ -1,4 +1,4 @@
-mod example;
+
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -8,7 +8,7 @@ use tokio::sync::oneshot::{
 };
 use tokio::time::Duration;
 
-type IrrecoverableError = anyhow::Error;
+pub type IrrecoverableError = anyhow::Error;
 type JoinHandle = tokio::task::JoinHandle<()>;
 
 // The User defines a task launcher, that takes:
@@ -82,19 +82,18 @@ impl<M: Manageable + Send> Supervisor<M> {
                 Some(message) = self.irrecoverable_signal.recv() => {
                     self.manageable.handle_irrecoverable(message).await?;
                     self.terminate().await?;
-
+                    println!("I have terminated the component");
                     // restart
                     let (panic_sender, panic_receiver) = channel(10);
                     let (cancel_sender, cancel_receiver) = oneshotChannel();
 
                     // call the launcher
                     let wrapped_handle: tokio::task::JoinHandle<()> =  self.manageable.start(panic_sender, cancel_receiver).await;
-
+                    println!("I have spawned the next component");
                     // reset the supervision handles & channel end points
                     self.irrecoverable_signal = panic_receiver;
                     self.cancellation_signal = Some(cancel_sender);
                     self.join_handle = Some(wrapped_handle);
-
                 },
 
                // Poll the JoinHandle<O>
@@ -110,11 +109,18 @@ impl<M: Manageable + Send> Supervisor<M> {
     const GRACE_TIMEOUT: Duration = Duration::from_secs(2);
 
     async fn terminate(&mut self) -> Result<(), anyhow::Error> {
-        self.cancellation_signal
-            .take() // replaces cancellation_signal with None
-            .expect("Internal component invariant broken: cancellation signal sender already used")
-            .send(())
-            .unwrap();
+
+        match self.cancellation_signal.take() {
+            Some(c) => {
+                match c.send(()) {
+                    Ok(_) => {},
+                    Err(e) => return Err(anyhow!("error found {:?}", e))
+                };
+            },
+            None => return Err(anyhow!("The cancellation signal was consumed"))
+        };
+        //todo: we are not seeing the terminating accept loop print .send(()).AWAIT!
+
 
         // poll (rather than join) the handle for completion for 2s (poll is non-consuming)
         // and then abort

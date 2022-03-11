@@ -1,8 +1,11 @@
-use crate::{IrrecoverableError, Manageable, Supervisor};
+extern crate component;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use component::{IrrecoverableError, Manageable, Supervisor};
 use std::net::TcpStream;
+use std::thread::sleep;
+use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver as oneshotReceiver;
 use tokio::task::JoinHandle;
@@ -11,10 +14,19 @@ pub struct Stream {}
 
 impl Stream {
     pub async fn listen(
-        stream: TcpStream,
         tx_irrecoverable: Sender<anyhow::Error>,
         rx_cancellation: oneshotReceiver<()>,
     ) {
+
+        let stream = match TcpStream::connect("127.0.0.1:8080") {
+            Ok(stream) => stream,
+            Err(e) => {
+                tx_irrecoverable.send(anyhow!(e))
+                    .await.expect("Could not send irrecoverable signal.");
+                return;
+            }
+        };
+
         tokio::select! {
             _ = async {
                 loop {
@@ -23,7 +35,7 @@ impl Stream {
                         Ok(_) => println!("reading from stream"), // process
                         Err(_) => {
                             let e = anyhow!("missing something required");
-                            tx_irrecoverable.send(e).await.expect("Could not send panic signal!🙀 ");
+                            tx_irrecoverable.send(e).await.expect("Could not send irrecoverable signal.");
                         }
                     } ;
                 }
@@ -44,9 +56,9 @@ impl Manageable for Stream {
         tx_irrecoverable: Sender<anyhow::Error>,
         rx_cancelllation: oneshotReceiver<()>,
     ) -> tokio::task::JoinHandle<()> {
-        let stream = TcpStream::connect("127.0.0.1:6379").unwrap();
+
         let handle: JoinHandle<()> =
-            tokio::spawn(Self::listen(stream, tx_irrecoverable, rx_cancelllation));
+            tokio::spawn(Self::listen(tx_irrecoverable, rx_cancelllation));
         handle
     }
 
@@ -59,10 +71,15 @@ impl Manageable for Stream {
     }
 }
 
-// TODO: set that up as an Example http://xion.io/post/code/rust-examples.html
 #[tokio::main]
 pub async fn main() {
+
     let stream = Stream {};
     let supervisor = Supervisor::new(stream);
-    supervisor.spawn().await.unwrap();
+    let _ = match supervisor.spawn().await {
+        Ok(_) => {},
+        Err(e) => println!("Got this error {:?}", e)
+    };
+    sleep( Duration::from_secs(1));
 }
+
