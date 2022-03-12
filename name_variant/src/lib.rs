@@ -58,9 +58,9 @@ fn match_enum_to_string(name: &Ident, variants: &DataEnum) -> proc_macro2::Token
     for variant in variants.variants.iter() {
         let variant_ident = &variant.ident;
         let fields_in_variant = match &variant.fields {
-            Fields::Unnamed(_) => quote_spanned! {variant.span()=> (..) },
-            Fields::Unit => quote_spanned! { variant.span()=> },
-            Fields::Named(_) => quote_spanned! {variant.span()=> {..} },
+            Fields::Unnamed(_) => quote_spanned! {variant.span() => (..) },
+            Fields::Unit => quote_spanned! { variant.span() => },
+            Fields::Named(_) => quote_spanned! {variant.span() => {..} },
         };
         let variant_string = variant_ident.to_string();
 
