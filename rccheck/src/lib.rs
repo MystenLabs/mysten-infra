@@ -14,6 +14,7 @@
 
 use std::{fmt, time::SystemTime};
 
+use ouroboros::self_referencing;
 use rustls::{
     client::{ServerCertVerified, ServerCertVerifier},
     server::{ClientCertVerified, ClientCertVerifier},
@@ -80,15 +81,35 @@ pub trait Certifiable {
 /// let psk = Psk::from_der(&spki).unwrap();
 /// ```
 ///
-#[derive(PartialEq, Clone, Debug)]
-pub struct Psk<'a>(pub SubjectPublicKeyInfo<'a>);
+#[self_referencing]
+#[derive(PartialEq, Debug)]
+pub struct Psk {
+    pub key_bytes: Vec<u8>,
+    #[covariant]
+    #[borrows(key_bytes)]
+    pub spki: SubjectPublicKeyInfo<'this>,
+}
 
-impl<'a> Eq for Psk<'a> {}
+impl Eq for Psk {}
 
-impl<'a> Psk<'a> {
-    pub fn from_der(bytes: &'a [u8]) -> Result<Psk<'a>, anyhow::Error> {
-        let spki = SubjectPublicKeyInfo::from_der(bytes)?;
-        Ok(Psk(spki.1))
+impl Psk {
+    pub fn from_der(bytes: &[u8]) -> Result<Psk, anyhow::Error> {
+        PskTryBuilder {
+            key_bytes: bytes.to_vec(),
+            spki_builder: |key_bytes: &Vec<u8>| {
+                SubjectPublicKeyInfo::from_der(key_bytes)
+                    .map(|(_, spki)| spki)
+                    .map_err(|e| e.into())
+            },
+        }
+        .try_build()
+    }
+}
+
+impl Clone for Psk {
+    fn clone(&self) -> Self {
+        // unwrap safe as the bytes match
+        Self::from_der(self.borrow_key_bytes()).unwrap()
     }
 }
 
@@ -96,19 +117,19 @@ impl<'a> Psk<'a> {
 /// Ser/de
 ////////////////////////////////////////////////////////////////
 
-impl<'a> Serialize for Psk<'a> {
+impl Serialize for Psk {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serializer.serialize_bytes(self.0.raw)
+        serializer.serialize_bytes(self.borrow_key_bytes())
     }
 }
 
 struct DerBytesVisitor;
 
 impl<'de> Visitor<'de> for DerBytesVisitor {
-    type Value = Psk<'de>;
+    type Value = Psk;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str("a borrowed Subject Public Key Info in DER format")
@@ -118,20 +139,18 @@ impl<'de> Visitor<'de> for DerBytesVisitor {
     where
         E: Error,
     {
-        let (_, spki) = SubjectPublicKeyInfo::from_der(v).map_err(Error::custom)?;
-        Ok(Psk(spki))
+        Psk::from_der(v).map_err(Error::custom)
     }
 
     fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
     where
         E: Error,
     {
-        let (_, spki) = SubjectPublicKeyInfo::from_der(v.as_bytes()).map_err(Error::custom)?;
-        Ok(Psk(spki))
+        Psk::from_der(v.as_bytes()).map_err(Error::custom)
     }
 }
 
-impl<'de> Deserialize<'de> for Psk<'de> {
+impl<'de> Deserialize<'de> for Psk {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -146,7 +165,7 @@ impl<'de> Deserialize<'de> for Psk<'de> {
 
 /// A `ClientCertVerifier` that will ensure that every client provides a valid, expected
 /// certificate, without any name checking.
-impl<'a> ClientCertVerifier for Psk<'a> {
+impl ClientCertVerifier for Psk {
     fn offer_client_auth(&self) -> bool {
         true
     }
@@ -175,10 +194,11 @@ impl<'a> ClientCertVerifier for Psk<'a> {
         let cert = X509Certificate::from_der(&end_entity.0[..])
             .map_err(|_| rustls::Error::InvalidCertificateEncoding)?;
         let spki = cert.1.public_key().clone();
-        if spki != self.0 {
+        if &spki != self.borrow_spki() {
             return Err(rustls::Error::InvalidCertificateData(format!(
                 "invalid peer certificate: received {:?} instead of expected {:?}",
-                spki, self.0
+                spki,
+                self.borrow_spki()
             )));
         }
 
@@ -199,7 +219,7 @@ impl<'a> ClientCertVerifier for Psk<'a> {
     }
 }
 
-impl<'a> ServerCertVerifier for Psk<'a> {
+impl<'a> ServerCertVerifier for Psk {
     // Verifies this is a valid certificate self-signed by the public key we expect(in PSK)
     // 1. we check the equality of the certificate's public key with the key we expect
     // 2. we prepare arguments for webpki's certificate verification (following the rustls implementation)
@@ -218,10 +238,11 @@ impl<'a> ServerCertVerifier for Psk<'a> {
         let cert = X509Certificate::from_der(&end_entity.0[..])
             .map_err(|_| rustls::Error::InvalidCertificateEncoding)?;
         let spki = cert.1.public_key().clone();
-        if spki != self.0 {
+        if &spki != self.borrow_spki() {
             return Err(rustls::Error::InvalidCertificateData(format!(
                 "invalid peer certificate: received {:?} instead of expected {:?}",
-                spki, self.0
+                spki,
+                self.borrow_spki()
             )));
         }
 
