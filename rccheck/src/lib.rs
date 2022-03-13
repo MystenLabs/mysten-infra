@@ -35,6 +35,9 @@ pub(crate) mod test_utils;
 
 pub mod ed25519_certgen;
 
+// Re-export our version of rustls to stave off compatiblity issues
+pub use rustls;
+
 type SignatureAlgorithms = &'static [&'static webpki::SignatureAlgorithm];
 static SUPPORTED_SIG_ALGS: SignatureAlgorithms = &[&webpki::ECDSA_P256_SHA256, &webpki::ED25519];
 
@@ -153,8 +156,8 @@ impl<'a> ClientCertVerifier for Psk<'a> {
     }
 
     fn client_auth_root_subjects(&self) -> Option<rustls::DistinguishedNames> {
-        // We can't guarantee subjects before having seen the cert
-        None
+        // We can't guarantee subjects before having seen the cert. This should not be None for compatiblity reasons
+        Some(rustls::DistinguishedNames::new())
     }
 
     // Verifies this is a valid certificate self-signed by the public key we expect(in PSK)
