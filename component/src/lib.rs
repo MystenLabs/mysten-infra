@@ -1,20 +1,18 @@
-
-
 use anyhow::anyhow;
 use async_trait::async_trait;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot::{
     channel as oneshotChannel, Receiver as oneshotReceiver, Sender as oneshotSender,
 };
-use tokio::time::Duration;
 
 pub type IrrecoverableError = anyhow::Error;
 type JoinHandle = tokio::task::JoinHandle<()>;
 
 // The User defines a task launcher, that takes:
-// - an irrecoverable error sender, on which IrrecoverableError is signaled in the task
-// - a cancellation handle, which will be listened to in the task
-// it then equips the task with those, launches it and returns the JoinHandle
+// - an irrecoverable error sender, on which the component sends information to the supervisor about
+// an irrecoverable event that has ocured
+// - a cancellation handle, which will be listened to in the task once an irrecoverable message
+// has been sent, used as an "ack" that the message has been received and so the function can return
 #[async_trait]
 pub trait Manageable {
     // The API for the task launcher
@@ -32,22 +30,19 @@ pub trait Manageable {
 }
 
 pub struct Supervisor<M: Manageable> {
-    cancellation_signal: Option<oneshotSender<()>>,
     irrecoverable_signal: Receiver<IrrecoverableError>,
+    cancellation_signal: Option<oneshotSender<()>>,
     join_handle: Option<JoinHandle>,
     manageable: M,
 }
 
 impl<M: Manageable + Send> Supervisor<M> {
     pub fn new(component: M) -> Self {
-        // initialize start_fn
-        // optionally, initialize the shutdown signal, the panic signal,
-        // initialize join_handle to None
         let (_, tr_irrecoverable) = channel(10);
         let (tx_cancellation, _) = oneshotChannel();
         Supervisor {
-            cancellation_signal: Some(tx_cancellation),
             irrecoverable_signal: tr_irrecoverable,
+            cancellation_signal: Some(tx_cancellation),
             join_handle: None,
             manageable: component,
         }
@@ -72,7 +67,7 @@ impl<M: Manageable + Send> Supervisor<M> {
     }
 
     // Run supervision of the child task
-    pub async fn run(&mut self) -> Result<(), anyhow::Error> {
+    pub async fn run(mut self) -> Result<(), anyhow::Error> {
         // select statement that listens for the following cases:
         //
         // Irrecoverable signal incoming => log, terminate and restart
@@ -81,68 +76,35 @@ impl<M: Manageable + Send> Supervisor<M> {
             tokio::select! {
                 Some(message) = self.irrecoverable_signal.recv() => {
                     self.manageable.handle_irrecoverable(message).await?;
-                    self.terminate().await?;
-                    println!("I have terminated the component");
-                    // restart
-                    let (panic_sender, panic_receiver) = channel(10);
-                    let (cancel_sender, cancel_receiver) = oneshotChannel();
-
-                    // call the launcher
-                    let wrapped_handle: tokio::task::JoinHandle<()> =  self.manageable.start(panic_sender, cancel_receiver).await;
-                    println!("I have spawned the next component");
-                    // reset the supervision handles & channel end points
-                    self.irrecoverable_signal = panic_receiver;
-                    self.cancellation_signal = Some(cancel_sender);
-                    self.join_handle = Some(wrapped_handle);
+                    self.restart().await?;
                 },
 
                // Poll the JoinHandle<O>
                _result =  self.join_handle.as_mut().unwrap(), if self.join_handle.is_some() => {
-                    // this is normal termination of the task returning result: O
-                    // HAPPY PATH :D
-                    return Ok(())
+                    // this could be due to an un-caught panic
+                    // we don't have a user-supplied message to log, so we create a generic one
+                    let message = anyhow!("An unexpected shutdown was observed in a component.");
+                    self.manageable.handle_irrecoverable(message).await?;
+                    self.restart().await?;
                 }
             }
         }
     }
 
-    const GRACE_TIMEOUT: Duration = Duration::from_secs(2);
+    async fn restart(&mut self,) -> Result<(), anyhow::Error> {
+        // restart
+        let (tx_irrecoverable, tr_irrecoverable) = channel(10);
+        let (tx_cancellation, tr_cancellation) = oneshotChannel();
 
-    async fn terminate(&mut self) -> Result<(), anyhow::Error> {
+        // call the start method
+        let wrapped_handle: JoinHandle =  self.manageable.start(tx_irrecoverable, tr_cancellation).await;
+        println!("I have spawned the next component");
 
-        match self.cancellation_signal.take() {
-            Some(c) => {
-                match c.send(()) {
-                    Ok(_) => {},
-                    Err(e) => return Err(anyhow!("error found {:?}", e))
-                };
-            },
-            None => return Err(anyhow!("The cancellation signal was consumed"))
-        };
-        //todo: we are not seeing the terminating accept loop print .send(()).AWAIT!
+        // reset the supervision handles & channel end points
+        self.irrecoverable_signal = tr_irrecoverable;
+        self.cancellation_signal = Some(tx_cancellation);
 
-
-        // poll (rather than join) the handle for completion for 2s (poll is non-consuming)
-        // and then abort
-        if let Some(ref mut handle) = self.join_handle {
-            loop {
-                tokio::select! {
-                    _ = tokio::time::sleep(Self::GRACE_TIMEOUT) => {
-                        println!("did not receive completion within {:?} s", Self::GRACE_TIMEOUT);
-                        self.join_handle.as_ref().unwrap().abort();
-                        break;
-                    }
-                    _result = handle => {
-                        break;
-                    }
-                }
-            }
-            Ok(())
-        } else {
-            // this has been called before initialization
-            return Err(anyhow!(
-                "Component has not yet been launched, cannot terminate."
-            ));
-        }
+        self.join_handle = Some(wrapped_handle);
+        Ok(())
     }
 }
