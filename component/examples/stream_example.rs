@@ -5,12 +5,18 @@ use std::sync::Once;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use component::{IrrecoverableError, Manageable, Supervisor};
-use tokio::net::TcpStream;
-use std::thread::sleep;
-use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver as oneshotReceiver;
 use tokio::task::JoinHandle;
+
+static mut SHOULD_FAIL: bool = true;
+static FIXER: Once = Once::new();
+
+fn fix() {
+    FIXER.call_once(|| unsafe {
+        SHOULD_FAIL = false;
+    })
+}
 
 /// We create two structs, an empty struct as a component that will contain functions
 /// that create and fully encapsulate an instance of the actual type.
@@ -20,30 +26,23 @@ pub struct MockTcpStreamComponent {}
 
 pub struct MockTcpStream {
     read_data: Vec<u8>,
-    write_data: Vec<u8>,
-    failure: Once,
 }
 
 impl MockTcpStream {
     pub fn new() -> Self {
         let read_data= Vec::new();
-        let write_data = Vec::new();
-        let failure = Once::new();
         MockTcpStream {
             read_data,
-            write_data,
-            failure,
         }
     }
 
-    fn mock_read(&self, buf: &mut [u8]) -> Result<usize, anyhow::Error> {
-        // failure
-        let mut f = false;
-        self.failure.call_once(|| {
-            f = true;
-        });
-        if f {
-            return Result::Err(anyhow!("Could not read from stream."))
+     fn mock_read(&self, buf: &mut [u8]) -> Result<usize, anyhow::Error> {
+        // failure should happen once
+        unsafe {
+            if SHOULD_FAIL {
+             fix();
+             return Result::Err(anyhow!("Could not read from stream."))
+            }
         }
 
         let size: usize = min(self.read_data.len(), buf.len());
@@ -63,7 +62,7 @@ impl MockTcpStreamComponent {
         loop {
             let mut buf = [0; 10];
             let _len = match m_tcp.mock_read(&mut buf) {
-                Ok(_) => println!("reading from stream"), // process
+                Ok(_) => {}, // process
                 Err(_) => {
                     let e = anyhow!("missing something required");
                     tx_irrecoverable.send(e).await.expect("Could not send irrecoverable signal.");
@@ -72,7 +71,6 @@ impl MockTcpStreamComponent {
                 }
             };
         }
-
     }
 }
 
@@ -80,7 +78,7 @@ async fn wait_for_cancellation(rx_cancellation: oneshotReceiver<()>) {
     loop {
         tokio::select! {
             _ = rx_cancellation => {
-                println!("terminating accept loop");
+                println!("terminating component task");
                 break;
             }
         }
@@ -96,7 +94,7 @@ impl Manageable for MockTcpStreamComponent {
         rx_cancellation: oneshotReceiver<()>,
     ) -> tokio::task::JoinHandle<()> {
 
-
+        println!("starting component task");
         let handle: JoinHandle<()> =
             tokio::spawn(Self::listen(tx_irrecoverable, rx_cancellation));
         handle
