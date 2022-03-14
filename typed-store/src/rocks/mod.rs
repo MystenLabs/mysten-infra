@@ -275,7 +275,7 @@ where
     fn contains_key(&self, key: &K) -> Result<bool, TypedStoreError> {
         let key_buf = be_fix_int_ser(key)?;
         Ok(self.rocksdb.key_may_exist_cf(&self.cf(), &key_buf)
-            && self.get(key).map(|v| v.is_some())?)
+            && self.rocksdb.get_pinned_cf(&self.cf(), &key_buf)?.is_some())
     }
 
     fn get(&self, key: &K) -> Result<Option<V>, TypedStoreError> {
