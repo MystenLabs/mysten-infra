@@ -8,11 +8,11 @@ use tokio::sync::oneshot::{
 pub type IrrecoverableError = anyhow::Error;
 type JoinHandle = tokio::task::JoinHandle<()>;
 
-// The User defines a task launcher, that takes:
-// - an irrecoverable error sender, on which the component sends information to the supervisor about
-// an irrecoverable event that has ocured
-// - a cancellation handle, which will be listened to in the task once an irrecoverable message
-// has been sent, used as an "ack" that the message has been received and so the function can return
+/// The User defines a task launcher, that takes:
+/// - an irrecoverable error sender, on which the component sends information to the supervisor about
+/// an irrecoverable event that has ocured
+/// - a cancellation handle, which will be listened to in the task once an irrecoverable message
+/// has been sent, used as an "ack" that the message has been received and so the function can return
 #[async_trait]
 pub trait Manageable {
     // The API for the task launcher
@@ -98,7 +98,6 @@ impl<M: Manageable + Send> Supervisor<M> {
 
         // call the start method
         let wrapped_handle: JoinHandle =  self.manageable.start(tx_irrecoverable, tr_cancellation).await;
-        println!("I have spawned the next component");
 
         // reset the supervision handles & channel end points
         self.irrecoverable_signal = tr_irrecoverable;
