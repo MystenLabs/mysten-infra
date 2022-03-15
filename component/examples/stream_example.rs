@@ -1,10 +1,10 @@
 extern crate component;
 
-use std::cmp::min;
-use std::sync::Once;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use component::{IrrecoverableError, Manageable, Supervisor};
+use std::cmp::min;
+use std::sync::Once;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver as oneshotReceiver;
 use tokio::task::JoinHandle;
@@ -30,18 +30,18 @@ pub struct MockTcpStream {
 
 impl MockTcpStream {
     pub fn new() -> Self {
-        let read_data= Vec::new();
-        MockTcpStream {
-            read_data,
-        }
+        let read_data = Vec::new();
+        MockTcpStream { read_data }
     }
 
-     fn mock_read(&self, buf: &mut [u8]) -> Result<usize, anyhow::Error> {
+    /// This function will fail on the first call and then succeed on preceding calls to create
+    /// a situation where we have an irrecoverable error.
+    fn mock_read(&self, buf: &mut [u8]) -> Result<usize, anyhow::Error> {
         // failure should happen once
         unsafe {
             if SHOULD_FAIL {
-             fix();
-             return Result::Err(anyhow!("Could not read from stream."))
+                fix();
+                return Result::Err(anyhow!("Could not read from stream."));
             }
         }
 
@@ -52,6 +52,16 @@ impl MockTcpStream {
 }
 
 impl MockTcpStreamComponent {
+    /// This is a function that should run continuously doing some operation, here we are
+    /// continuously listening on a mocked TCP Stream. This is ultimately the function that we
+    /// are supervising.
+    /// Inside this function we first initialize any state that will be used in this component so
+    /// that the scope is also correctly reset on a restart.
+    ///
+    /// This would be an excellent place to also add a scopeguard with a defer_panic so that if the
+    /// component panics without a user caught irrecoverable error, a descriptive error message and/
+    /// or stacktrace can be forwarded to the supervisor, and resource cleanup can occur before the
+    /// existing component goes out of scope.
     pub async fn listen(
         tx_irrecoverable: Sender<anyhow::Error>,
         rx_cancellation: oneshotReceiver<()>,
@@ -62,18 +72,24 @@ impl MockTcpStreamComponent {
         loop {
             let mut buf = [0; 10];
             let _len = match m_tcp.mock_read(&mut buf) {
-                Ok(_) => {}, // process
+                Ok(_) => {} // process
                 Err(_) => {
                     let e = anyhow!("missing something required");
-                    tx_irrecoverable.send(e).await.expect("Could not send irrecoverable signal.");
+                    tx_irrecoverable
+                        .send(e)
+                        .await
+                        .expect("Could not send irrecoverable signal.");
                     wait_for_cancellation(rx_cancellation).await;
-                    return
+                    return;
                 }
             };
         }
     }
 }
 
+/// Wait for the cancellation signal in order to ensure that the message we sent to the
+/// supervisor was received before we return which causes the join handle to complete. If we
+/// were to return immediately, there would be no guarantee the message we send will be received.
 async fn wait_for_cancellation(rx_cancellation: oneshotReceiver<()>) {
     loop {
         tokio::select! {
@@ -88,22 +104,20 @@ async fn wait_for_cancellation(rx_cancellation: oneshotReceiver<()>) {
 #[async_trait]
 impl Manageable for MockTcpStreamComponent {
     #[allow(clippy::async_yields_async)]
+    /// The start function spawns a tokio task supplied with a function that
+    /// should be constantly running.
     async fn start(
         &self,
         tx_irrecoverable: Sender<anyhow::Error>,
         rx_cancellation: oneshotReceiver<()>,
     ) -> tokio::task::JoinHandle<()> {
-
         println!("starting component task");
-        let handle: JoinHandle<()> =
-            tokio::spawn(Self::listen(tx_irrecoverable, rx_cancellation));
+        let handle: JoinHandle<()> = tokio::spawn(Self::listen(tx_irrecoverable, rx_cancellation));
         handle
     }
 
-    async fn handle_irrecoverable(
-        &self,
-        irrecoverable: IrrecoverableError,
-    ) -> Result<(), anyhow::Error> {
+    /// Implement this function to log the error messages or take any task-specific action.
+    fn handle_irrecoverable(&self, irrecoverable: IrrecoverableError) -> Result<(), anyhow::Error> {
         println!("Received irrecoverable error: {}", irrecoverable);
         Ok(())
     }
@@ -111,12 +125,16 @@ impl Manageable for MockTcpStreamComponent {
 
 #[tokio::main]
 pub async fn main() -> Result<(), anyhow::Error> {
-
+    // Create a component
     let stream_component = MockTcpStreamComponent {};
+
+    // Create a supervisor for the component
     let supervisor = Supervisor::new(stream_component);
+
+    // Spawn the supervisor to start the component and supervision.
     let _ = match supervisor.spawn().await {
-        Ok(_) => {},
-        Err(e) => println!("Got this error {:?}", e)
+        Ok(_) => {}
+        Err(e) => println!("Got this error {:?}", e),
     };
     Ok(())
 }
