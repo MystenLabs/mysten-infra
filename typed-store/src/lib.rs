@@ -8,6 +8,8 @@
     rust_2021_compatibility
 )]
 
+extern crate core;
+
 use eyre::Result;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -33,6 +35,7 @@ type StoreResult<T> = Result<T, StoreError>;
 pub enum StoreCommand<Key, Value> {
     Write(Key, Value),
     Delete(Key),
+    DeleteAll(Vec<Key>, oneshot::Sender<StoreResult<()>>),
     Read(Key, oneshot::Sender<StoreResult<Option<Value>>>),
     NotifyRead(Key, oneshot::Sender<StoreResult<Option<Value>>>),
 }
@@ -69,7 +72,20 @@ where
                             }
                         }
                     }
-
+                    StoreCommand::DeleteAll(keys, sender) => {
+                        let result = keyed_db.multi_remove(keys.iter());
+                        // notify the obligations only when the delete was successful
+                        if result.is_ok() {
+                            for k in keys {
+                                if let Some(mut senders) = obligations.remove(&k) {
+                                    while let Some(s) = senders.pop_front() {
+                                        let _ = s.send(Ok(None));
+                                    }
+                                }
+                            }
+                        }
+                        let _ = sender.send(result);
+                    }
                     StoreCommand::Read(key, sender) => {
                         let response = keyed_db.get(&key);
                         let _ = sender.send(response);
@@ -107,6 +123,19 @@ where
         if let Err(e) = self.channel.send(StoreCommand::Delete(key)).await {
             panic!("Failed to send Delete command to store: {}", e);
         }
+    }
+
+    /// Atomically removes all the data referenced by the provided keys.
+    /// If the operation is successful, then the result will be a non
+    /// error empty result. Otherwise the error is returned.
+    pub async fn remove_all(&self, keys: &[Key]) -> StoreResult<()> {
+        let (sender, receiver) = oneshot::channel();
+        if let Err(e) = self.channel.send(StoreCommand::DeleteAll(keys.to_vec(), sender)).await {
+            panic!("Failed to send DeleteAll command to store: {}", e);
+        }
+        receiver
+            .await
+            .expect("Failed to receive reply to RemoveAll command from store")
     }
 
     pub async fn read(&self, key: Key) -> StoreResult<Option<Value>> {
