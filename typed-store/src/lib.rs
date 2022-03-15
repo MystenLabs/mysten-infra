@@ -8,7 +8,6 @@
     rust_2021_compatibility
 )]
 
-extern crate core;
 
 use eyre::Result;
 use serde::{de::DeserializeOwned, Serialize};
