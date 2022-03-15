@@ -74,3 +74,35 @@ async fn read_notify() {
     store.write(key, value).await;
     assert!(handle.await.is_ok());
 }
+
+#[tokio::test]
+async fn remove_all_successfully() {
+    // GIVEN Create new store.
+    let db = rocks::DBMap::<Vec<u8>, Vec<u8>>::open(temp_dir(), None, None).unwrap();
+    let store = Store::new(db);
+
+    // AND Write values to the store.
+    let keys = vec![
+        vec![0u8, 1u8, 2u8, 1u8],
+        vec![0u8, 1u8, 2u8, 2u8],
+        vec![0u8, 1u8, 2u8, 3u8]
+    ];
+    let value = vec![4u8, 5u8, 6u8, 7u8];
+
+    for key in keys.clone() {
+        store.write(key.clone(), value.clone()).await;
+    }
+
+    // WHEN multi remove values
+    let result = store.remove_all(keys.clone().into_iter()).await;
+
+    // THEN
+    assert!(result.is_ok());
+
+    // AND values doesn't exist any more
+    for key in keys {
+        let result = store.read(key).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+}

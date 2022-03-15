@@ -127,9 +127,9 @@ where
     /// Atomically removes all the data referenced by the provided keys.
     /// If the operation is successful, then the result will be a non
     /// error empty result. Otherwise the error is returned.
-    pub async fn remove_all(&self, keys: &[Key]) -> StoreResult<()> {
+    pub async fn remove_all(&self, keys: impl IntoIterator<Item = Key>) -> StoreResult<()> {
         let (sender, receiver) = oneshot::channel();
-        if let Err(e) = self.channel.send(StoreCommand::DeleteAll(keys.to_vec(), sender)).await {
+        if let Err(e) = self.channel.send(StoreCommand::DeleteAll(keys.into_iter().collect(), sender)).await {
             panic!("Failed to send DeleteAll command to store: {}", e);
         }
         receiver
