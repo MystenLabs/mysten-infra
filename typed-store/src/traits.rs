@@ -53,7 +53,12 @@ where
     fn values(&'a self) -> Self::Values;
 
     /// Returns a vector of values corresponding to the keys provided.
-    fn multi_get(&self, keys: &[K]) -> Result<Vec<Option<V>>, Self::Error>;
+    fn multi_get<J>(
+        &self,
+        keys: impl IntoIterator<Item = J>,
+    ) -> Result<Vec<Option<V>>, Self::Error>
+    where
+        J: Borrow<K>;
 
     /// Inserts key-value pairs.
     fn multi_insert<J, U>(
