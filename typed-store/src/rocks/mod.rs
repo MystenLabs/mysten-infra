@@ -333,11 +333,19 @@ where
     }
 
     /// Returns a vector of values corresponding to the keys provided.
-    fn multi_get(&self, keys: &[K]) -> Result<Vec<Option<V>>, TypedStoreError> {
+    fn multi_get<J>(
+        &self,
+        keys: impl IntoIterator<Item = J>,
+    ) -> Result<Vec<Option<V>>, TypedStoreError>
+    where
+        J: Borrow<K>,
+    {
         let cf = self.cf();
 
-        let keys_bytes: Result<Vec<_>, TypedStoreError> =
-            keys.iter().map(|k| Ok((&cf, be_fix_int_ser(k)?))).collect();
+        let keys_bytes: Result<Vec<_>, TypedStoreError> = keys
+            .into_iter()
+            .map(|k| Ok((&cf, be_fix_int_ser(k.borrow())?)))
+            .collect();
 
         let results = self.rocksdb.multi_get_cf(keys_bytes?);
 
