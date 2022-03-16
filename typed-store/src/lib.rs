@@ -8,7 +8,6 @@
     rust_2021_compatibility
 )]
 
-
 use eyre::Result;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -66,8 +65,8 @@ where
                         }
                     }
                     StoreCommand::WriteAll(key_values, sender) => {
-                        let response = keyed_db.multi_insert(key_values.iter()
-                            .map(|(k,v)|(k,v)));
+                        let response =
+                            keyed_db.multi_insert(key_values.iter().map(|(k, v)| (k, v)));
 
                         if response.is_ok() {
                             for (key, _) in key_values {
@@ -142,9 +141,19 @@ where
     /// Atomically writes all the key-value pairs in storage.
     /// If the operation is successful, then the result will be a non
     /// error empty result. Otherwise the error is returned.
-    pub async fn write_all(&self, key_value_pairs: impl IntoIterator<Item = (Key, Value)>) -> StoreResult<()> {
+    pub async fn write_all(
+        &self,
+        key_value_pairs: impl IntoIterator<Item = (Key, Value)>,
+    ) -> StoreResult<()> {
         let (sender, receiver) = oneshot::channel();
-        if let Err(e) = self.channel.send(StoreCommand::WriteAll(key_value_pairs.into_iter().collect(), sender)).await {
+        if let Err(e) = self
+            .channel
+            .send(StoreCommand::WriteAll(
+                key_value_pairs.into_iter().collect(),
+                sender,
+            ))
+            .await
+        {
             panic!("Failed to send WriteAll command to store: {}", e);
         }
         receiver
@@ -163,7 +172,11 @@ where
     /// error empty result. Otherwise the error is returned.
     pub async fn remove_all(&self, keys: impl IntoIterator<Item = Key>) -> StoreResult<()> {
         let (sender, receiver) = oneshot::channel();
-        if let Err(e) = self.channel.send(StoreCommand::DeleteAll(keys.into_iter().collect(), sender)).await {
+        if let Err(e) = self
+            .channel
+            .send(StoreCommand::DeleteAll(keys.into_iter().collect(), sender))
+            .await
+        {
             panic!("Failed to send DeleteAll command to store: {}", e);
         }
         receiver
@@ -182,9 +195,16 @@ where
     }
 
     /// Fetches all the values for the provided keys.
-    pub async fn read_all(&self, keys: impl IntoIterator<Item = Key>) -> StoreResult<Vec<Option<Value>>> {
+    pub async fn read_all(
+        &self,
+        keys: impl IntoIterator<Item = Key>,
+    ) -> StoreResult<Vec<Option<Value>>> {
         let (sender, receiver) = oneshot::channel();
-        if let Err(e) = self.channel.send(StoreCommand::ReadAll(keys.into_iter().collect(), sender)).await {
+        if let Err(e) = self
+            .channel
+            .send(StoreCommand::ReadAll(keys.into_iter().collect(), sender))
+            .await
+        {
             panic!("Failed to send ReadAll command to store: {}", e);
         }
         receiver
