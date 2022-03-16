@@ -106,3 +106,37 @@ async fn remove_all_successfully() {
         assert!(result.unwrap().is_none());
     }
 }
+
+#[tokio::test]
+async fn write_and_read_all_successfully() {
+    // GIVEN Create new store.
+    let db = rocks::DBMap::<Vec<u8>, Vec<u8>>::open(temp_dir(), None, None).unwrap();
+    let store = Store::new(db);
+
+    // AND key-values to store.
+    let key_values = vec![
+        (vec![0u8, 1u8, 2u8, 1u8], vec![4u8, 5u8, 6u8, 7u8]),
+        (vec![0u8, 1u8, 2u8, 2u8], vec![4u8, 5u8, 6u8, 7u8]),
+        (vec![0u8, 1u8, 2u8, 3u8], vec![4u8, 5u8, 6u8, 7u8])
+    ];
+
+    // WHEN
+    let result = store.write_all(key_values.clone()).await;
+
+    // THEN
+    assert!(result.is_ok());
+
+    // AND read_all to ensure that values have been written
+    let keys: Vec<Vec<u8>> = key_values.clone().into_iter().map(|(key, _)|key).collect();
+    let result = store.read_all(keys).await;
+
+    assert!(result.is_ok());
+    assert_eq!(result.as_ref().unwrap().len(), 3);
+
+    let mut i = 0;
+    for value in result.unwrap().into_iter() {
+        assert!(value.is_some());
+        assert_eq!(value.unwrap(), key_values[i].1);
+        i+=1;
+    }
+}
