@@ -11,13 +11,25 @@ use tokio::sync::oneshot::{
 pub type IrrecoverableError = anyhow::Error;
 type JoinHandle = tokio::task::JoinHandle<()>;
 
+static CHANNEL_SIZE: usize = 10;
+
 /// A Supervisor is instantiated to supervise a task that should always be running.
 /// A running supervisor will start a component task, and ensure that it is restarted
 /// if it ever stops.
 pub struct Supervisor<M: Manageable> {
+    /// a message from our supervised component containing an error that we cannot recover
+    /// receiving on this will trigger the component to restart
     irrecoverable_signal: Receiver<IrrecoverableError>,
+
+    /// a signal to the supervised component that is implicitly sent after we receive a
+    /// message on the channel above, which provides the supervised component with an "ack"
     cancellation_signal: Option<oneshotSender<()>>,
+
+    /// the join handle of the tokio task that was spawned by the Manageable start method
     join_handle: Option<JoinHandle>,
+
+    /// the Manageable trait object that contains functions to start the component and to
+    /// handle_irrecoverable in the case that a restart is needed
     manageable: M,
 }
 
@@ -42,17 +54,19 @@ pub trait Manageable {
     ) -> tokio::task::JoinHandle<()>; // Note the task is "silent" (returns nothing)
 
     // The function for cleanup after the task has encountered an irrecoverable error
-    fn handle_irrecoverable(&self, irrecoverable: IrrecoverableError) -> Result<(), anyhow::Error>;
+    fn handle_irrecoverable(
+        &mut self,
+        irrecoverable: IrrecoverableError,
+    ) -> Result<(), anyhow::Error>;
 }
 
 impl<M: Manageable + Send> Supervisor<M> {
     /// Creates a new supervisor using a Manageable component.
     pub fn new(component: M) -> Self {
-        let (_, tr_irrecoverable) = channel(10);
-        let (tx_cancellation, _) = oneshotChannel();
+        let (_, tr_irrecoverable) = channel(CHANNEL_SIZE);
         Supervisor {
             irrecoverable_signal: tr_irrecoverable,
-            cancellation_signal: Some(tx_cancellation),
+            cancellation_signal: None,
             join_handle: None,
             manageable: component,
         }
@@ -60,10 +74,10 @@ impl<M: Manageable + Send> Supervisor<M> {
 
     /// Spawn calls the start function of the Manageable component and runs supervision.
     pub async fn spawn(mut self) -> Result<(), anyhow::Error> {
-        let (tx_irrecoverable, tr_irrecoverable) = channel(10);
+        let (tx_irrecoverable, tr_irrecoverable) = channel(CHANNEL_SIZE);
         let (tx_cancellation, tr_cancellation) = oneshotChannel();
 
-        // this assumes the start_fn is populated
+        // call Manageable start method
         let wrapped_handle = self
             .manageable
             .start(tx_irrecoverable, tr_cancellation)
@@ -77,7 +91,7 @@ impl<M: Manageable + Send> Supervisor<M> {
     }
 
     /// Run watches continuously for irrecoverable errors or JoinHandle completion.
-    pub async fn run(mut self) -> Result<(), anyhow::Error> {
+    async fn run(mut self) -> Result<(), anyhow::Error> {
         // select statement that listens for the following cases:
         //
         // Irrecoverable signal incoming => log, terminate and restart
@@ -86,28 +100,28 @@ impl<M: Manageable + Send> Supervisor<M> {
         // The handle_irrecoverable is run before the existing task gets
         // cancelled by restart in the case that an irrecoverable signal
         // was sent to us. This makes resource cleanup possible.
+
         loop {
+            let mut message = anyhow!("An unexpected shutdown was observed in a component.");
             tokio::select! {
-                Some(message) = self.irrecoverable_signal.recv() => {
-                    self.manageable.handle_irrecoverable(message)?;
-                    self.restart().await?;
+                Some(m) = self.irrecoverable_signal.recv() => {
+                    message = m;
                 },
 
                // Poll the JoinHandle<O>
                _result =  self.join_handle.as_mut().unwrap(), if self.join_handle.is_some() => {
                     // this could be due to an un-caught panic
-                    // we don't have a user-supplied message to log, so we create a generic one
-                    let message = anyhow!("An unexpected shutdown was observed in a component.");
-                    self.manageable.handle_irrecoverable(message)?;
-                    self.restart().await?;
+                    // we don't have a user-supplied message to log, so we use the generic one
                 }
             }
+            self.manageable.handle_irrecoverable(message)?;
+            self.restart().await;
         }
     }
 
-    async fn restart(&mut self) -> Result<(), anyhow::Error> {
+    async fn restart(&mut self) {
         // restart
-        let (tx_irrecoverable, tr_irrecoverable) = channel(10);
+        let (tx_irrecoverable, tr_irrecoverable) = channel(CHANNEL_SIZE);
         let (tx_cancellation, tr_cancellation) = oneshotChannel();
 
         // call the start method
@@ -122,6 +136,5 @@ impl<M: Manageable + Send> Supervisor<M> {
         self.cancellation_signal = Some(tx_cancellation);
 
         self.join_handle = Some(wrapped_handle);
-        Ok(())
     }
 }

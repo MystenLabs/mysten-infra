@@ -63,8 +63,7 @@ impl MockTcpStreamComponent {
     ///
     /// This would be an excellent place to also add a scopeguard with a defer_panic so that if the
     /// component panics without a user caught irrecoverable error, a descriptive error message and/
-    /// or stacktrace can be forwarded to the supervisor, and resource cleanup can occur before the
-    /// existing component goes out of scope.
+    /// or stacktrace can be forwarded to the supervisor.
     pub async fn listen(
         tx_irrecoverable: Sender<anyhow::Error>,
         rx_cancellation: oneshotReceiver<()>,
@@ -121,7 +120,10 @@ impl Manageable for MockTcpStreamComponent {
 
     /// Implement this function to log the error messages or take any task-specific action such as
     /// closing a file or terminating children tasks.
-    fn handle_irrecoverable(&self, irrecoverable: IrrecoverableError) -> Result<(), anyhow::Error> {
+    fn handle_irrecoverable(
+        &mut self,
+        irrecoverable: IrrecoverableError,
+    ) -> Result<(), anyhow::Error> {
         println!("Received irrecoverable error: {}", irrecoverable);
         Ok(())
     }
