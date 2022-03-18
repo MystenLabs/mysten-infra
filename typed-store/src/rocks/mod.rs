@@ -8,7 +8,7 @@ mod values;
 use crate::traits::Map;
 use bincode::Options;
 use collectable::TryExtend;
-use rocksdb::{DBWithThreadMode, MultiThreaded, WriteBatch};
+use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, WriteBatch};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{borrow::Borrow, marker::PhantomData, path::Path, sync::Arc};
 
@@ -273,7 +273,11 @@ where
     type Values = Values<'a, V>;
 
     fn contains_key(&self, key: &K) -> Result<bool, TypedStoreError> {
-        self.get(key).map(|v| v.is_some())
+        let key_buf = be_fix_int_ser(key)?;
+        // [`rocksdb::DBWithThreadMode::key_may_exist_cf`] can have false positives,
+        // but no false negatives. We use it to short-circuit the absent case
+        Ok(self.rocksdb.key_may_exist_cf(&self.cf(), &key_buf)
+            && self.rocksdb.get_pinned_cf(&self.cf(), &key_buf)?.is_some())
     }
 
     fn get(&self, key: &K) -> Result<Option<V>, TypedStoreError> {
@@ -407,6 +411,17 @@ pub fn open_cf<P: AsRef<Path>>(
     db_options: Option<rocksdb::Options>,
     opt_cfs: &[&str],
 ) -> Result<Arc<rocksdb::DBWithThreadMode<MultiThreaded>>, TypedStoreError> {
+    let options = db_options.unwrap_or_default();
+    let column_descriptors: Vec<_> = opt_cfs.iter().map(|name| (*name, &options)).collect();
+    open_cf_opts(path, Some(options.clone()), &column_descriptors[..])
+}
+
+/// Opens a database with options, and a number of column families with individual options that are created if they do not exist.
+pub fn open_cf_opts<P: AsRef<Path>>(
+    path: P,
+    db_options: Option<rocksdb::Options>,
+    opt_cfs: &[(&str, &rocksdb::Options)],
+) -> Result<Arc<rocksdb::DBWithThreadMode<MultiThreaded>>, TypedStoreError> {
     // Customize database options
     let mut options = db_options.unwrap_or_default();
     let mut cfs = rocksdb::DBWithThreadMode::<MultiThreaded>::list_cf(&options, &path)
@@ -415,7 +430,7 @@ pub fn open_cf<P: AsRef<Path>>(
 
     // Customize CFs
 
-    for cf_key in opt_cfs.iter() {
+    for (cf_key, _) in opt_cfs.iter() {
         let key = (*cf_key).to_owned();
         if !cfs.contains(&key) {
             cfs.push(key);
@@ -427,9 +442,15 @@ pub fn open_cf<P: AsRef<Path>>(
     let rocksdb = {
         options.create_if_missing(true);
         options.create_missing_column_families(true);
-        Arc::new(rocksdb::DBWithThreadMode::<MultiThreaded>::open_cf(
-            &options, &primary, &cfs,
-        )?)
+        Arc::new(
+            rocksdb::DBWithThreadMode::<MultiThreaded>::open_cf_descriptors(
+                &options,
+                &primary,
+                opt_cfs
+                    .iter()
+                    .map(|(name, opts)| ColumnFamilyDescriptor::new(*name, (*opts).clone())),
+            )?,
+        )
     };
     Ok(rocksdb)
 }
