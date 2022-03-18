@@ -54,6 +54,12 @@ impl MockTcpStream {
     }
 }
 
+impl Default for MockTcpStream {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockTcpStreamComponent {
     /// This is a function that should run continuously doing some operation, here we are
     /// continuously listening on a mocked TCP Stream. This is ultimately the function that we
