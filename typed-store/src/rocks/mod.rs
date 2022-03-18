@@ -274,6 +274,8 @@ where
 
     fn contains_key(&self, key: &K) -> Result<bool, TypedStoreError> {
         let key_buf = be_fix_int_ser(key)?;
+        // [`rocksdb::DBWithThreadMode::key_may_exist_cf`] can have false positives,
+        // but no false negatives. We use it to short-circuit the absent case
         Ok(self.rocksdb.key_may_exist_cf(&self.cf(), &key_buf)
             && self.rocksdb.get_pinned_cf(&self.cf(), &key_buf)?.is_some())
     }
@@ -428,7 +430,7 @@ pub fn open_cf_opts<P: AsRef<Path>>(
 
     // Customize CFs
 
-    for cf_key in opt_cfs.iter().map(|(name, _)| name) {
+    for (cf_key, _) in opt_cfs.iter() {
         let key = (*cf_key).to_owned();
         if !cfs.contains(&key) {
             cfs.push(key);
