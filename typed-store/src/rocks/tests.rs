@@ -100,6 +100,61 @@ fn test_multi_get() {
 }
 
 #[test]
+fn test_non_conflicting_insert() {
+    let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+
+    // non-conflicting works on an empty key
+    db.non_conflicting_insert(&123456789, &"123456789".to_string())
+        .expect("Failed to non-conflicting insert");
+    assert_eq!(
+        Some("123456789".to_string()),
+        db.get(&123456789).expect("Failed to get")
+    );
+
+    // non-conflicting does not work on a set key
+    db.insert(&23456, &"23456".to_string())
+        .expect("Failed to insert");
+    db.non_conflicting_insert(&23456, &"65432".to_string())
+        .expect("Failed to non-conflicting insert");
+    assert_eq!(
+        Some("23456".to_string()),
+        db.get(&23456).expect("Failed to get")
+    );
+
+    // more shenanigans with the WAL: several successive operands
+    db.non_conflicting_insert(&23456, &"aaa".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&23456, &"aaa".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&23456, &"aaa".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&123456789, &"aaa".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&123456789, &"aaa".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&123456789, &"aaa".to_string())
+        .expect("Failed to non-conflicting insert");
+
+    assert_eq!(
+        Some("23456".to_string()),
+        db.get(&23456).expect("Failed to get")
+    );
+
+    assert_eq!(
+        Some("123456789".to_string()),
+        db.get(&123456789).expect("Failed to get")
+    );
+
+    // non-conflicting insert does not change a set key when inserting the same value
+    db.non_conflicting_insert(&23456, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+    assert_eq!(
+        Some("23456".to_string()),
+        db.get(&23456).expect("Failed to get")
+    );
+}
+
+#[test]
 fn test_skip() {
     let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
 
