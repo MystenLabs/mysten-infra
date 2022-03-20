@@ -424,16 +424,17 @@ pub fn open_cf_opts<P: AsRef<Path>>(
 ) -> Result<Arc<rocksdb::DBWithThreadMode<MultiThreaded>>, TypedStoreError> {
     // Customize database options
     let mut options = db_options.unwrap_or_default();
-    let mut cfs = rocksdb::DBWithThreadMode::<MultiThreaded>::list_cf(&options, &path)
+
+    let mut opt_cfs: std::collections::HashMap<_, _> = opt_cfs.iter().cloned().collect();
+    let cfs = rocksdb::DBWithThreadMode::<MultiThreaded>::list_cf(&options, &path)
         .ok()
         .unwrap_or_default();
 
-    // Customize CFs
-
-    for (cf_key, _) in opt_cfs.iter() {
-        let key = (*cf_key).to_owned();
-        if !cfs.contains(&key) {
-            cfs.push(key);
+    let default_rocksdb_options = rocksdb::Options::default();
+    // Add CFs not explicitly listed
+    for cf_key in cfs.iter() {
+        if !opt_cfs.contains_key(&cf_key[..]) {
+            opt_cfs.insert(cf_key, &default_rocksdb_options);
         }
     }
 
@@ -457,7 +458,7 @@ pub fn open_cf_opts<P: AsRef<Path>>(
 
 /// TODO: Good description of why we're doing this : RocksDB stores keys in BE and has a seek operator on iterators, see https://github.com/facebook/rocksdb/wiki/Iterator#introduction
 #[inline]
-pub fn be_fix_int_ser<S>(t: &S) -> Result<Vec<u8>, TypedStoreError>
+pub(crate) fn be_fix_int_ser<S>(t: &S) -> Result<Vec<u8>, TypedStoreError>
 where
     S: ?Sized + serde::Serialize,
 {
