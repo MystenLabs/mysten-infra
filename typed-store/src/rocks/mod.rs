@@ -281,6 +281,27 @@ impl DBBatch {
             })?;
         Ok(self)
     }
+
+    /// inserts a range of (key, value) pairs given as an iterator, but only if they are non-conflicting (unset)
+    pub fn non_conflicting_insert_batch<J: Borrow<K>, K: Serialize, U: Borrow<V>, V: Serialize>(
+        mut self,
+        db: &DBMap<K, V>,
+        new_vals: impl IntoIterator<Item = (J, U)>,
+    ) -> Result<Self, TypedStoreError> {
+        if !Arc::ptr_eq(&db.rocksdb, &self.rocksdb) {
+            return Err(TypedStoreError::CrossDBBatch);
+        }
+
+        new_vals
+            .into_iter()
+            .try_for_each::<_, Result<_, TypedStoreError>>(|(k, v)| {
+                let k_buf = be_fix_int_ser(k.borrow())?;
+                let v_buf = bincode::serialize(v.borrow())?;
+                self.batch.merge_cf(&db.cf(), k_buf, v_buf);
+                Ok(())
+            })?;
+        Ok(self)
+    }
 }
 
 impl<'a, K, V> Map<'a, K, V> for DBMap<K, V>

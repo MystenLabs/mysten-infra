@@ -341,6 +341,44 @@ fn test_insert_batch() {
 }
 
 #[test]
+fn test_non_conflicting_insert_batch() {
+    let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+    // the inserts on empty keys go through
+    let keys_vals = (1i32..100).map(|i| (i, i.to_string()));
+    let non_conflicting_insert_batch = db
+        .batch()
+        .non_conflicting_insert_batch(&db, keys_vals.clone())
+        .expect("Failed to batch insert");
+    let _ = non_conflicting_insert_batch
+        .write()
+        .expect("Failed to execute batch");
+    for (k, v) in keys_vals.clone() {
+        let val = db.get(&k).expect("Failed to get inserted key");
+        assert_eq!(Some(v), val);
+    }
+
+    // We plan for a range overlapping with the previously set
+    let other_keys_vals = (50..150).map(|i| (i, format!("foo {}", i)));
+    let non_conflicting_insert_batch = db
+        .batch()
+        .non_conflicting_insert_batch(&db, other_keys_vals)
+        .expect("Failed to batch insert");
+    let _ = non_conflicting_insert_batch
+        .write()
+        .expect("Failed to execute batch");
+    for (k, v) in keys_vals {
+        let val = db.get(&k).expect("Failed to get inserted key");
+        // on the non-overlapping portion the writes go through
+        if k >= 100 {
+            assert_eq!(Some(v), val.map(|v| format!("foo {}", v)));
+        } else {
+            // on the overlapping segment they don't go through
+            assert_eq!(Some(v), val);
+        }
+    }
+}
+
+#[test]
 fn test_insert_batch_across_cf() {
     let rocks = open_cf(temp_dir(), None, &["First_CF", "Second_CF"]).unwrap();
 
