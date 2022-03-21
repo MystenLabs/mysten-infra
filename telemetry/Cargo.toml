@@ -1,0 +1,21 @@
+[package]
+name = "telemetry"
+version = "0.1.0"
+license = "Apache-2.0"
+authors = ["Evan Chan <echan@mystenlabs.com>"]
+description = "Library for common telemetry and observability functionality"
+repository = "https://github.com/mystenlabs/mysten-infra"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1.15.0", features = ["sync", "macros", "rt", "rt-multi-thread"] }
+tracing = { version = "0.1.31", features = ["log"] }
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3.9", features = ["time", "registry", "env-filter"] }
+tracing-bunyan-formatter = "0.3"
+tracing-opentelemetry = "0.17"
+opentelemetry = { version = "*", features = ["rt-tokio"] }
+opentelemetry-jaeger = { version = "0.16", features = ["rt-tokio"] }
+console-subscriber = "0.1.3"
