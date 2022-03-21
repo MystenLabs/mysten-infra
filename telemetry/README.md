@@ -4,10 +4,22 @@ This is a library for common telemetry functionality, especially subscribers for
 libraries.  The subscribers enable writing trace data to Jaeger, distributed tracing,
 common logs and metrics destinations, etc.
 
-### Stdout (default)
+Getting started is easy.  In your app:
+
+```rust
+  let config = telemetry::TelemetryConfig {
+    service_name: "my_app".into(),
+    ..Default::default()
+  };
+  telemetry::init(config);
+```
+
+### Stdout vs file output
 
 By default, logs (but not spans) are formatted for human readability and output to stdout, with key-value tags at the end of every line.
-`RUST_LOG` can be configured for custom logging output, including filtering - see the logging levels section above.
+`RUST_LOG` can be configured for custom logging output, including filtering.
+
+By setting `log_file` in the config, one can write log output to a daily-rotated file.
 
 ### Tracing and span output
 
