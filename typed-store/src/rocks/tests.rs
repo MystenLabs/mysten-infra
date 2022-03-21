@@ -140,6 +140,25 @@ fn test_non_conflicting_insert() {
         db.get(&23456).expect("Failed to get")
     );
 
+    // more shenanigans with the WAL: several successive operands that work
+    db.non_conflicting_insert(&23456, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&23456, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&23456, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&123456789, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&123456789, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&123456789, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+
+    assert_eq!(
+        Some("23456".to_string()),
+        db.get(&23456).expect("Failed to get")
+    );
+
     assert_eq!(
         Some("123456789".to_string()),
         db.get(&123456789).expect("Failed to get")

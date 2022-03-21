@@ -454,18 +454,11 @@ pub(crate) fn non_conflicting_insert_merge(
     existing_val: Option<&[u8]>,
     operands: &MergeOperands,
 ) -> Option<Vec<u8>> {
-    let nops = operands.len();
-    let mut result: Vec<u8> = Vec::with_capacity(nops);
+    let mut result: Vec<u8> = Vec::new();
     if let Some(v) = existing_val {
-        for e in v {
-            result.push(*e);
-        }
-    } else {
-        for op in operands {
-            for e in op {
-                result.push(*e);
-            }
-        }
+        result.extend(v.iter());
+    } else if let Some(op) = operands.into_iter().next() {
+        result.extend(op.iter());
     }
     Some(result)
 }
