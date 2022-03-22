@@ -1,3 +1,6 @@
+// Copyright (c) 2022, Mysten Labs, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 //! This is a library for common Tokio Tracing subscribers, such as for Jaeger.
 //!
 //! The subscribers are configured using TelemetryConfig passed into the `init()` method.
