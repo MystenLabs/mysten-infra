@@ -11,14 +11,15 @@
 //!   service_name: "my_app".into(),
 //!   ..Default::default()
 //! };
-//! telemetry::init(config);
+//! // Important! Need to keep the guard and not drop until program terminates
+//! let guard = telemetry::init(config);
 //! ```
 
 use opentelemetry::global;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
 use tracing::info;
 use tracing::subscriber::set_global_default;
-use tracing_appender::non_blocking::NonBlocking;
+use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
 
@@ -39,14 +40,12 @@ pub struct TelemetryConfig {
     pub log_file: Option<String>,
 }
 
-fn get_output(config: &TelemetryConfig) -> NonBlocking {
+fn get_output(config: &TelemetryConfig) -> (NonBlocking, WorkerGuard) {
     if let Some(logfile_prefix) = &config.log_file {
         let file_appender = tracing_appender::rolling::daily("", logfile_prefix);
-        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-        non_blocking
+        tracing_appender::non_blocking(file_appender)
     } else {
-        let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::stdout());
-        non_blocking
+        tracing_appender::non_blocking(std::io::stdout())
     }
 }
 
@@ -78,11 +77,13 @@ fn set_panic_hook() {
 }
 
 /// Initialize telemetry subscribers based on TelemetryConfig
-pub fn init(config: TelemetryConfig) {
+/// NOTE: You must keep the returned guard and not drop it until the end of the program, otherwise
+/// logs will not appear!!
+pub fn init(config: TelemetryConfig) -> WorkerGuard {
     // TODO: reorganize different telemetry options so they can use the same registry
     // Code to add logging/tracing config from environment, including RUST_LOG
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let nb_output = get_output(&config);
+    let (nb_output, guard) = get_output(&config);
 
     if config.json_log_output {
         // See https://www.lpalmieri.com/posts/2020-09-27-zero-to-production-4-are-we-observable-yet/#5-7-tracing-bunyan-formatter
@@ -133,6 +134,10 @@ pub fn init(config: TelemetryConfig) {
     }
 
     set_panic_hook();
+
+    // The guard must be returned and kept in the main fn of the app, as when it's dropped then the output
+    // gets flushed and closed. If this is dropped too early then no output will appear!
+    guard
 }
 
 mod tests {
@@ -146,7 +151,7 @@ mod tests {
             service_name: "my_app".into(),
             ..Default::default()
         };
-        init(config);
+        let guard = init(config);
 
         info!(a = 1, "This will be INFO.");
         debug!(a = 2, "This will be DEBUG.");

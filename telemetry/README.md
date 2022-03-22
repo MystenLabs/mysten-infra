@@ -11,8 +11,15 @@ Getting started is easy.  In your app:
     service_name: "my_app".into(),
     ..Default::default()
   };
-  telemetry::init(config);
+  let guard = telemetry::init(config);
 ```
+
+It is important to retain the guard until the end of the program.  Assign it in the main fn and keep it,
+for once it drops then log output will stop.
+
+You can also run the example and see output in ANSI color:
+
+    cargo run --example easy-init
 
 ### Stdout vs file output
 
