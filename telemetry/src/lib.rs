@@ -88,10 +88,10 @@ fn set_panic_hook() {
 }
 
 #[cfg(feature = "json")]
-fn bunyan_json_subscriber(nb_output: NonBlocking) {
+fn bunyan_json_subscriber(config: &TelemetryConfig, env_filter: EnvFilter, nb_output: NonBlocking) {
     // See https://www.lpalmieri.com/posts/2020-09-27-zero-to-production-4-are-we-observable-yet/#5-7-tracing-bunyan-formatter
     // Also Bunyan layer addes JSON logging for tracing spans with duration information
-    let formatting_layer = BunyanFormattingLayer::new(config.service_name, nb_output);
+    let formatting_layer = BunyanFormattingLayer::new(config.service_name.clone(), nb_output);
     // The `with` method is provided by `SubscriberExt`, an extension
     // trait for `Subscriber` exposed by `tracing_subscriber`
     let subscriber = Registry::default()
@@ -142,7 +142,7 @@ pub fn init(config: TelemetryConfig) -> WorkerGuard {
 
     if config.json_log_output {
         #[cfg(feature = "json")]
-        bunyan_json_subscriber(nb_output);
+        bunyan_json_subscriber(&config, env_filter, nb_output);
         #[cfg(not(feature = "json"))]
         panic!("Cannot enable JSON log output because json package feature is not enabled");
     } else if config.tokio_console {
@@ -188,7 +188,7 @@ mod tests {
             service_name: "my_app".into(),
             ..Default::default()
         };
-        let guard = init(config);
+        let _guard = init(config);
 
         info!(a = 1, "This will be INFO.");
         debug!(a = 2, "This will be DEBUG.");
