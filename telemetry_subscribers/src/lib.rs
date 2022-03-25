@@ -8,12 +8,12 @@
 //!
 //! Getting started is easy:
 //! ```
-//! let config = telemetry::TelemetryConfig {
+//! let config = telemetry_subscribers::TelemetryConfig {
 //!   service_name: "my_app".into(),
 //!   ..Default::default()
 //! };
 //! // Important! Need to keep the guard and not drop until program terminates
-//! let guard = telemetry::init(config);
+//! let guard = telemetry_subscribers::init(config);
 //! ```
 //!
 //! ## Features

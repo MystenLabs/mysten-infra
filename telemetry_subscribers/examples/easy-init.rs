@@ -4,11 +4,11 @@
 use tracing::{debug, info, warn};
 
 fn main() {
-    let config = telemetry::TelemetryConfig {
+    let config = telemetry_subscribers::TelemetryConfig {
         service_name: "my_app".into(),
         ..Default::default()
     };
-    let guard = telemetry::init(config);
+    let guard = telemetry_subscribers::init(config);
 
     info!(a = 1, "This will be INFO.");
     debug!(a = 2, "This will be DEBUG.");
