@@ -38,6 +38,7 @@ use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 /// ===
 /// - json_log_output: Output JSON logs to stdout only.  No other options will work.
 /// - log_file: If defined, write output to a file starting with this name, ex app.log
+/// - log_level: error/warn/info/debug/trace, defaults to info
 /// - service_name:
 #[derive(Default, Clone, Debug)]
 pub struct TelemetryConfig {
@@ -49,6 +50,8 @@ pub struct TelemetryConfig {
     pub json_log_output: bool,
     /// If defined, write output to a file starting with this name, ex app.log
     pub log_file: Option<String>,
+    /// Log level to set, defaults to info
+    pub log_level: Option<String>,
 }
 
 fn get_output(config: &TelemetryConfig) -> (NonBlocking, WorkerGuard) {
@@ -137,7 +140,8 @@ where
 pub fn init(config: TelemetryConfig) -> WorkerGuard {
     // TODO: reorganize different telemetry options so they can use the same registry
     // Code to add logging/tracing config from environment, including RUST_LOG
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let log_level = config.log_level.clone().unwrap_or("info".into());
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
     let (nb_output, guard) = get_output(&config);
 
     if config.json_log_output {
