@@ -140,8 +140,9 @@ where
 pub fn init(config: TelemetryConfig) -> WorkerGuard {
     // TODO: reorganize different telemetry options so they can use the same registry
     // Code to add logging/tracing config from environment, including RUST_LOG
-    let log_level = config.log_level.clone().unwrap_or("info".into());
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
+    let log_level = config.log_level.clone().unwrap_or_else(|| "info".into());
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
     let (nb_output, guard) = get_output(&config);
 
     if config.json_log_output {
