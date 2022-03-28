@@ -130,7 +130,7 @@ impl Manageable for MockTcpStreamComponent {
         &mut self,
         irrecoverable: IrrecoverableError,
     ) -> Result<(), anyhow::Error> {
-        println!("Received irrecoverable error: {}", irrecoverable);
+        println!("Received irrecoverable error: {irrecoverable}");
         Ok(())
     }
 }

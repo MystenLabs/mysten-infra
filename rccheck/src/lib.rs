@@ -318,6 +318,6 @@ fn pki_error(error: webpki::Error) -> rustls::Error {
         UnsupportedSignatureAlgorithm | UnsupportedSignatureAlgorithmForPublicKey => {
             rustls::Error::InvalidCertificateSignatureType
         }
-        e => rustls::Error::InvalidCertificateData(format!("invalid peer certificate: {}", e)),
+        e => rustls::Error::InvalidCertificateData(format!("invalid peer certificate: {e}")),
     }
 }

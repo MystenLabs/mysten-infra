@@ -134,7 +134,7 @@ where
 {
     pub async fn write(&self, key: Key, value: Value) {
         if let Err(e) = self.channel.send(StoreCommand::Write(key, value)).await {
-            panic!("Failed to send Write command to store: {}", e);
+            panic!("Failed to send Write command to store: {e}");
         }
     }
 
@@ -154,7 +154,7 @@ where
             ))
             .await
         {
-            panic!("Failed to send WriteAll command to store: {}", e);
+            panic!("Failed to send WriteAll command to store: {e}");
         }
         receiver
             .await
@@ -163,7 +163,7 @@ where
 
     pub async fn remove(&self, key: Key) {
         if let Err(e) = self.channel.send(StoreCommand::Delete(key)).await {
-            panic!("Failed to send Delete command to store: {}", e);
+            panic!("Failed to send Delete command to store: {e}");
         }
     }
 
@@ -177,7 +177,7 @@ where
             .send(StoreCommand::DeleteAll(keys.into_iter().collect(), sender))
             .await
         {
-            panic!("Failed to send DeleteAll command to store: {}", e);
+            panic!("Failed to send DeleteAll command to store: {e}");
         }
         receiver
             .await
@@ -187,7 +187,7 @@ where
     pub async fn read(&self, key: Key) -> StoreResult<Option<Value>> {
         let (sender, receiver) = oneshot::channel();
         if let Err(e) = self.channel.send(StoreCommand::Read(key, sender)).await {
-            panic!("Failed to send Read command to store: {}", e);
+            panic!("Failed to send Read command to store: {e}");
         }
         receiver
             .await
@@ -205,7 +205,7 @@ where
             .send(StoreCommand::ReadAll(keys.into_iter().collect(), sender))
             .await
         {
-            panic!("Failed to send ReadAll command to store: {}", e);
+            panic!("Failed to send ReadAll command to store: {e}");
         }
         receiver
             .await
@@ -219,7 +219,7 @@ where
             .send(StoreCommand::NotifyRead(key, sender))
             .await
         {
-            panic!("Failed to send NotifyRead command to store: {}", e);
+            panic!("Failed to send NotifyRead command to store: {e}");
         }
         receiver
             .await

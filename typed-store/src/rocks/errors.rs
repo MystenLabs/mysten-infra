@@ -36,7 +36,7 @@ impl From<RocksError> for RocksErrorDef {
 
 impl From<RocksError> for TypedStoreError {
     fn from(err: RocksError) -> Self {
-        TypedStoreError::RocksDBError(format!("{}", err))
+        TypedStoreError::RocksDBError(format!("{err}"))
     }
 }
 
@@ -108,6 +108,6 @@ impl From<bincode::Error> for BincodeErrorDef {
 
 impl From<bincode::Error> for TypedStoreError {
     fn from(err: bincode::Error) -> Self {
-        TypedStoreError::SerializationError(format!("{}", err))
+        TypedStoreError::SerializationError(format!("{err}"))
     }
 }
