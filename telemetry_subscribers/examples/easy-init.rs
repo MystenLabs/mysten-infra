@@ -8,7 +8,7 @@ fn main() {
         service_name: "my_app".into(),
         ..Default::default()
     };
-    let guard = telemetry_subscribers::init(config);
+    let _guard = telemetry_subscribers::init(config);
 
     info!(a = 1, "This will be INFO.");
     debug!(a = 2, "This will be DEBUG.");
