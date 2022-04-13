@@ -31,6 +31,9 @@ use tracing::subscriber::set_global_default;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
 
+#[cfg(feature = "chrome")]
+use tracing_chrome::ChromeLayerBuilder;
+
 #[cfg(feature = "json")]
 use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 
@@ -48,11 +51,20 @@ pub struct TelemetryConfig {
     pub tokio_console: bool,
     /// Output JSON logs.  Tracing and Tokio Console are not available if this is enabled.
     pub json_log_output: bool,
+    /// Write chrome trace output, which can be loaded from chrome://tracing
+    pub chrome_trace_output: bool,
     /// If defined, write output to a file starting with this name, ex app.log
     pub log_file: Option<String>,
     /// Log level to set, defaults to info
     pub log_level: Option<String>,
 }
+
+#[cfg(feature = "chrome")]
+type ChromeGuard = tracing_chrome::FlushGuard;
+#[cfg(not(feature = "chrome"))]
+type ChromeGuard = ();
+
+pub struct TelemetryGuards(WorkerGuard, Option<ChromeGuard>);
 
 fn get_output(config: &TelemetryConfig) -> (NonBlocking, WorkerGuard) {
     if let Some(logfile_prefix) = &config.log_file {
@@ -137,13 +149,16 @@ where
 /// Initialize telemetry subscribers based on TelemetryConfig
 /// NOTE: You must keep the returned guard and not drop it until the end of the program, otherwise
 /// logs will not appear!!
-pub fn init(config: TelemetryConfig) -> WorkerGuard {
+pub fn init(config: TelemetryConfig) -> TelemetryGuards {
     // TODO: reorganize different telemetry options so they can use the same registry
     // Code to add logging/tracing config from environment, including RUST_LOG
     let log_level = config.log_level.clone().unwrap_or_else(|| "info".into());
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
-    let (nb_output, guard) = get_output(&config);
+    let (nb_output, worker_guard) = get_output(&config);
+
+    #[allow(unused_mut)]
+    let mut chrome_guard = None;
 
     if config.json_log_output {
         #[cfg(feature = "json")]
@@ -155,6 +170,16 @@ pub fn init(config: TelemetryConfig) -> WorkerGuard {
         console_subscriber::init();
         #[cfg(not(feature = "tokio-console"))]
         panic!("Cannot enable Tokio console subscriber because tokio-console feature not enabled");
+    } else if config.chrome_trace_output {
+        #[cfg(feature = "chrome")]
+        {
+            let (chrome_layer, guard) = ChromeLayerBuilder::new().build();
+            let subscriber = Registry::default().with(chrome_layer);
+            set_global_default(subscriber).expect("Failed to set subscriber");
+            chrome_guard = Some(guard);
+        }
+        #[cfg(not(feature = "chrome"))]
+        panic!("Cannot enable chrome traces because chrome feature not enabled");
     } else {
         // Output to file or to stdout with ANSI colors
         let fmt_layer = fmt::layer()
@@ -178,7 +203,7 @@ pub fn init(config: TelemetryConfig) -> WorkerGuard {
 
     // The guard must be returned and kept in the main fn of the app, as when it's dropped then the output
     // gets flushed and closed. If this is dropped too early then no output will appear!
-    guard
+    TelemetryGuards(worker_guard, chrome_guard)
 }
 
 #[cfg(test)]
