@@ -271,6 +271,19 @@ fn test_try_extend() {
 }
 
 #[test]
+fn test_try_extend_from_slice() {
+    let mut db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+    let keys_vals = (1..100).map(|i| (i, i.to_string()));
+
+    db.try_extend_from_slice(&keys_vals.clone().collect::<Vec<_>>()[..])
+        .expect("Failed to extend the DB with (k, v) pairs");
+    for (k, v) in keys_vals {
+        let val = db.get(&k).expect("Failed to get inserted key");
+        assert_eq!(Some(v), val);
+    }
+}
+
+#[test]
 fn test_insert_batch() {
     let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
     let keys_vals = (1..100).map(|i| (i, i.to_string()));
