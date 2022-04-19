@@ -23,8 +23,7 @@ use serde::{
     de::{Error, Visitor},
     Deserialize, Deserializer, Serialize,
 };
-use x509_parser::certificate::X509Certificate;
-use x509_parser::{traits::FromDer, x509::SubjectPublicKeyInfo};
+use x509_parser::{certificate::X509Certificate, traits::FromDer, x509::SubjectPublicKeyInfo};
 
 #[cfg(test)]
 #[path = "tests/psk_tests.rs"]
