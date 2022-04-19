@@ -100,6 +100,80 @@ fn test_multi_get() {
 }
 
 #[test]
+fn test_non_conflicting_insert() {
+    let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+
+    // non-conflicting works on an empty key
+    db.non_conflicting_insert(&123456789, &"123456789".to_string())
+        .expect("Failed to non-conflicting insert");
+    assert_eq!(
+        Some("123456789".to_string()),
+        db.get(&123456789).expect("Failed to get")
+    );
+
+    // non-conflicting does not work on a set key
+    db.insert(&23456, &"23456".to_string())
+        .expect("Failed to insert");
+    db.non_conflicting_insert(&23456, &"65432".to_string())
+        .expect("Failed to non-conflicting insert");
+    assert_eq!(
+        Some("23456".to_string()),
+        db.get(&23456).expect("Failed to get")
+    );
+
+    // more shenanigans with the WAL: several successive operands
+    db.non_conflicting_insert(&23456, &"aaa".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&23456, &"aaa".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&23456, &"aaa".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&123456789, &"aaa".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&123456789, &"aaa".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&123456789, &"aaa".to_string())
+        .expect("Failed to non-conflicting insert");
+
+    assert_eq!(
+        Some("23456".to_string()),
+        db.get(&23456).expect("Failed to get")
+    );
+
+    // more shenanigans with the WAL: several successive operands that work
+    db.non_conflicting_insert(&23456, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&23456, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&23456, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&123456789, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&123456789, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+    db.non_conflicting_insert(&123456789, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+
+    assert_eq!(
+        Some("23456".to_string()),
+        db.get(&23456).expect("Failed to get")
+    );
+
+    assert_eq!(
+        Some("123456789".to_string()),
+        db.get(&123456789).expect("Failed to get")
+    );
+
+    // non-conflicting insert does not change a set key when inserting the same value
+    db.non_conflicting_insert(&23456, &"23456".to_string())
+        .expect("Failed to non-conflicting insert");
+    assert_eq!(
+        Some("23456".to_string()),
+        db.get(&23456).expect("Failed to get")
+    );
+}
+
+#[test]
 fn test_skip() {
     let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
 
@@ -295,6 +369,44 @@ fn test_insert_batch() {
     for (k, v) in keys_vals {
         let val = db.get(&k).expect("Failed to get inserted key");
         assert_eq!(Some(v), val);
+    }
+}
+
+#[test]
+fn test_non_conflicting_insert_batch() {
+    let db = DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
+    // the inserts on empty keys go through
+    let keys_vals = (1i32..100).map(|i| (i, i.to_string()));
+    let non_conflicting_insert_batch = db
+        .batch()
+        .non_conflicting_insert_batch(&db, keys_vals.clone())
+        .expect("Failed to batch insert");
+    let _ = non_conflicting_insert_batch
+        .write()
+        .expect("Failed to execute batch");
+    for (k, v) in keys_vals.clone() {
+        let val = db.get(&k).expect("Failed to get inserted key");
+        assert_eq!(Some(v), val);
+    }
+
+    // We plan for a range overlapping with the previously set
+    let other_keys_vals = (50..150).map(|i| (i, format!("foo {}", i)));
+    let non_conflicting_insert_batch = db
+        .batch()
+        .non_conflicting_insert_batch(&db, other_keys_vals)
+        .expect("Failed to batch insert");
+    let _ = non_conflicting_insert_batch
+        .write()
+        .expect("Failed to execute batch");
+    for (k, v) in keys_vals {
+        let val = db.get(&k).expect("Failed to get inserted key");
+        // on the non-overlapping portion the writes go through
+        if k >= 100 {
+            assert_eq!(Some(v), val.map(|v| format!("foo {}", v)));
+        } else {
+            // on the overlapping segment they don't go through
+            assert_eq!(Some(v), val);
+        }
     }
 }
 

@@ -8,7 +8,7 @@ mod values;
 use crate::traits::Map;
 use bincode::Options;
 use collectable::TryExtend;
-use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, WriteBatch};
+use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MergeOperands, MultiThreaded, WriteBatch};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{borrow::Borrow, marker::PhantomData, path::Path, sync::Arc};
 
@@ -135,6 +135,27 @@ impl<K, V> DBMap<K, V> {
     }
 }
 
+impl<K, V> DBMap<K, V>
+where
+    K: Serialize + DeserializeOwned,
+    V: Serialize + DeserializeOwned,
+{
+    /// Inserts a value at the given key if the key is unset or already equal to the expected value.
+    /// If the key is already set to the value passed as an argument, this is a noop.
+    /// If the key is set to any other value, this does not modify it.
+    ///
+    /// This relies on a precise merge operator being set on the column family: we set it with default options,
+    /// but this may fail if the DBMap's column family is something else.
+    ///
+    pub fn non_conflicting_insert(&self, key: &K, value: &V) -> Result<(), TypedStoreError> {
+        let key_buf = be_fix_int_ser(key)?;
+        let value_buf = bincode::serialize(value)?;
+
+        let _ = self.rocksdb.merge_cf(&self.cf(), &key_buf, &value_buf)?;
+        Ok(())
+    }
+}
+
 /// Provides a mutable struct to form a collection of database write operations, and execute them.
 ///
 /// Batching write and delete operations is faster than performing them one by one and ensures their atomicity,
@@ -256,6 +277,27 @@ impl DBBatch {
                 let k_buf = be_fix_int_ser(k.borrow())?;
                 let v_buf = bincode::serialize(v.borrow())?;
                 self.batch.put_cf(&db.cf(), k_buf, v_buf);
+                Ok(())
+            })?;
+        Ok(self)
+    }
+
+    /// inserts a range of (key, value) pairs given as an iterator, but only if they are non-conflicting (unset)
+    pub fn non_conflicting_insert_batch<J: Borrow<K>, K: Serialize, U: Borrow<V>, V: Serialize>(
+        mut self,
+        db: &DBMap<K, V>,
+        new_vals: impl IntoIterator<Item = (J, U)>,
+    ) -> Result<Self, TypedStoreError> {
+        if !Arc::ptr_eq(&db.rocksdb, &self.rocksdb) {
+            return Err(TypedStoreError::CrossDBBatch);
+        }
+
+        new_vals
+            .into_iter()
+            .try_for_each::<_, Result<_, TypedStoreError>>(|(k, v)| {
+                let k_buf = be_fix_int_ser(k.borrow())?;
+                let v_buf = bincode::serialize(v.borrow())?;
+                self.batch.merge_cf(&db.cf(), k_buf, v_buf);
                 Ok(())
             })?;
         Ok(self)
@@ -405,6 +447,22 @@ where
     }
 }
 
+// This is used internally as a merge operator, see:
+// https://github.com/facebook/rocksdb/wiki/Merge-Operator
+pub(crate) fn non_conflicting_insert_merge(
+    _new_key: &[u8],
+    existing_val: Option<&[u8]>,
+    operands: &MergeOperands,
+) -> Option<Vec<u8>> {
+    let mut result: Vec<u8> = Vec::new();
+    if let Some(v) = existing_val {
+        result.extend(v.iter());
+    } else if let Some(op) = operands.into_iter().next() {
+        result.extend(op.iter());
+    }
+    Some(result)
+}
+
 /// Opens a database with options, and a number of column families that are created if they do not exist.
 pub fn open_cf<P: AsRef<Path>>(
     path: P,
@@ -412,8 +470,13 @@ pub fn open_cf<P: AsRef<Path>>(
     opt_cfs: &[&str],
 ) -> Result<Arc<rocksdb::DBWithThreadMode<MultiThreaded>>, TypedStoreError> {
     let options = db_options.unwrap_or_default();
-    let column_descriptors: Vec<_> = opt_cfs.iter().map(|name| (*name, &options)).collect();
-    open_cf_opts(path, Some(options.clone()), &column_descriptors[..])
+
+    let mut cf_options = options.clone();
+    cf_options
+        .set_merge_operator_associative("non_conflicting_insert", non_conflicting_insert_merge);
+
+    let column_descriptors: Vec<_> = opt_cfs.iter().map(|name| (*name, &cf_options)).collect();
+    open_cf_opts(path, Some(options), &column_descriptors[..])
 }
 
 /// Opens a database with options, and a number of column families with individual options that are created if they do not exist.
