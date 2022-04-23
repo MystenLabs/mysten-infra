@@ -1,7 +1,7 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-#[derive(Copy, Clone, Debug, Eq)]
+#[derive(Copy, Clone, Eq)]
 pub struct PeerId(pub ed25519_dalek::PublicKey);
 
 impl std::hash::Hash for PeerId {
@@ -25,6 +25,21 @@ impl std::cmp::PartialOrd for PeerId {
 impl std::cmp::Ord for PeerId {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.0.as_bytes().cmp(other.0.as_bytes())
+    }
+}
+
+impl std::fmt::Display for PeerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in self.0.as_bytes() {
+            write!(f, "{:02x}", byte)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for PeerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PeerId({})", self)
     }
 }
 

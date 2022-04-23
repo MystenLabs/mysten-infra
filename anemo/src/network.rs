@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{Connection, ConnectionOrigin, Endpoint, Incoming, PeerId, Request, Response, Result};
+use anyhow::anyhow;
 use bytes::Bytes;
 use futures::{
     stream::{Fuse, FuturesUnordered},
@@ -17,7 +18,7 @@ use std::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tower::{util::BoxCloneService, ServiceExt};
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, warn};
 
 #[derive(Clone)]
 pub struct Network(Arc<NetworkInner>);
@@ -26,12 +27,16 @@ impl Network {
     /// Start a network and return a handle to it
     ///
     /// Requires that this is called from within the context of a tokio runtime
-    pub fn start(endpoint: Endpoint, incoming: Incoming) -> Self {
+    pub fn start(
+        endpoint: Endpoint,
+        incoming: Incoming,
+        rpc_service: BoxCloneService<Request, Response, Infallible>,
+    ) -> Self {
         let network = Self(Arc::new(NetworkInner {
             endpoint,
             connections: Default::default(),
             on_uni: Mutex::new(noop_service()),
-            on_bi: Mutex::new(echo_service()),
+            on_bi: Mutex::new(rpc_service),
         }));
 
         info!("Starting network");
@@ -57,6 +62,10 @@ impl Network {
 
     pub async fn rpc(&self, peer: PeerId, request: Bytes) -> Result<Bytes> {
         self.0.rpc(peer, request).await
+    }
+
+    pub async fn rpc_with_addr(&self, addr: SocketAddr, request: Bytes) -> Result<Bytes> {
+        self.0.rpc_with_addr(addr, request).await
     }
 
     pub async fn send_message(&self, peer: PeerId, request: Bytes) -> Result<()> {
@@ -110,13 +119,44 @@ impl NetworkInner {
     }
 
     async fn rpc(&self, peer: PeerId, request: Bytes) -> Result<Bytes> {
-        let connection = self.connections.read().get(&peer).unwrap().clone();
+        let connection = self
+            .connections
+            .read()
+            .get(&peer)
+            .ok_or_else(|| anyhow!("not connected to peer {peer}"))?
+            .clone();
+        Self::do_rpc(connection, request).await
+    }
+
+    async fn rpc_with_addr(&self, addr: SocketAddr, request: Bytes) -> Result<Bytes> {
+        let maybe_connection = self
+            .connections
+            .read()
+            .values()
+            .find(|connection| connection.remote_address() == addr)
+            .cloned();
+        let connection = if let Some(connection) = maybe_connection {
+            connection
+        } else {
+            let peer_id = self.connect(addr).await?;
+            self.connections.read().get(&peer_id).unwrap().clone()
+        };
+
+        Self::do_rpc(connection, request).await
+    }
+
+    async fn do_rpc(connection: Connection, request: Bytes) -> Result<Bytes> {
         let (send_stream, recv_stream) = connection.open_bi().await?;
         let mut send_stream = FramedWrite::new(send_stream, network_message_frame_codec());
         let mut recv_stream = FramedRead::new(recv_stream, network_message_frame_codec());
         send_stream.send(request).await?;
-        send_stream.get_mut().finish().await.unwrap();
-        let response = recv_stream.next().await.unwrap()?;
+        send_stream.get_mut().finish().await?;
+        let response = recv_stream.next().await.ok_or_else(|| {
+            anyhow!(
+                "unable to get response from peer {:?}",
+                connection.peer_identity()
+            )
+        })??;
         Ok(response.into())
     }
 
@@ -329,15 +369,26 @@ impl BiStreamRequestHandler {
         }
     }
 
-    async fn handle(mut self) {
+    async fn handle(self) {
+        if let Err(e) = self.do_handle().await {
+            warn!("handling request failed: {e}");
+        }
+    }
+
+    async fn do_handle(mut self) -> Result<()> {
         //TODO define wire format
-        let request = self.recv_stream.next().await.unwrap().unwrap();
+        let request = self
+            .recv_stream
+            .next()
+            .await
+            .ok_or_else(|| anyhow!("unable to recieve message"))??;
         let request = Request {
             body: request.into(),
         };
         let response = self.service.oneshot(request).await.expect("Infallible");
-        self.send_stream.send(response.body).await.unwrap();
-        self.send_stream.get_mut().finish().await.unwrap();
+        self.send_stream.send(response.body).await?;
+        self.send_stream.get_mut().finish().await?;
+        Ok(())
     }
 }
 
@@ -354,13 +405,24 @@ impl UniStreamRequestHandler {
         }
     }
 
-    async fn handle(mut self) {
+    async fn handle(self) {
+        if let Err(e) = self.do_handle().await {
+            warn!("handling request failed: {e}");
+        }
+    }
+
+    async fn do_handle(mut self) -> Result<()> {
         //TODO define wire format
-        let request = self.recv_stream.next().await.unwrap().unwrap();
+        let request = self
+            .recv_stream
+            .next()
+            .await
+            .ok_or_else(|| anyhow!("unable to recieve message"))??;
         let request = Request {
             body: request.into(),
         };
         let _ = self.service.oneshot(request).await.expect("Infallible");
+        Ok(())
     }
 }
 
@@ -447,8 +509,8 @@ mod test {
         let addr_2 = endpoint_2.local_addr();
         trace!("2: {}", endpoint_2.local_addr());
 
-        let network_1 = Network::start(endpoint_1, incoming_1);
-        let network_2 = Network::start(endpoint_2, incoming_2);
+        let network_1 = Network::start(endpoint_1, incoming_1, echo_service());
+        let network_2 = Network::start(endpoint_2, incoming_2, echo_service());
 
         let peer = network_1.connect(addr_2).await?;
         let response = network_1.rpc(peer, msg.as_ref().into()).await?;
@@ -460,16 +522,16 @@ mod test {
         assert_eq!(response, msg.as_ref());
         Ok(())
     }
-}
 
-fn echo_service() -> BoxCloneService<Request, Response, Infallible> {
-    let handle = move |request: Request| async move {
-        trace!("recieved: {}", request.body.escape_ascii());
-        let response = Response { body: request.body };
-        Result::<Response, Infallible>::Ok(response)
-    };
+    fn echo_service() -> BoxCloneService<Request, Response, Infallible> {
+        let handle = move |request: Request| async move {
+            trace!("recieved: {}", request.body.escape_ascii());
+            let response = Response { body: request.body };
+            Result::<Response, Infallible>::Ok(response)
+        };
 
-    tower::service_fn(handle).boxed_clone()
+        tower::service_fn(handle).boxed_clone()
+    }
 }
 
 fn noop_service() -> BoxCloneService<Request, (), Infallible> {
