@@ -33,12 +33,11 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
 
-#[cfg(feature = "json")]
-use tracing_appender::non_blocking::NonBlocking;
-
 #[cfg(feature = "chrome")]
 use tracing_chrome::ChromeLayerBuilder;
 
+#[cfg(feature = "json")]
+use tracing_appender::non_blocking::NonBlocking;
 #[cfg(feature = "json")]
 use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 
