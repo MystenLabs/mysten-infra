@@ -25,11 +25,16 @@
 use opentelemetry::global;
 #[cfg(feature = "jaeger")]
 use opentelemetry::sdk::propagation::TraceContextPropagator;
+use tracing_subscriber::fmt::writer::BoxMakeWriter;
 
-use tracing::info;
 use tracing::subscriber::set_global_default;
-use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
+use tracing::{info, Level};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
+
+#[cfg(feature = "json")]
+use tracing_appender::non_blocking::NonBlocking;
 
 #[cfg(feature = "chrome")]
 use tracing_chrome::ChromeLayerBuilder;
@@ -64,14 +69,49 @@ type ChromeGuard = tracing_chrome::FlushGuard;
 #[cfg(not(feature = "chrome"))]
 type ChromeGuard = ();
 
-pub struct TelemetryGuards(WorkerGuard, Option<ChromeGuard>);
+pub struct TelemetryGuards(Vec<WorkerGuard>, Option<ChromeGuard>);
 
-fn get_output(config: &TelemetryConfig) -> (NonBlocking, WorkerGuard) {
+fn get_output(config: &TelemetryConfig) -> (BoxMakeWriter, Vec<WorkerGuard>) {
+    let cur_dir = std::env::current_dir().ok().unwrap().join("logs");
+    std::fs::create_dir_all(&cur_dir).ok().unwrap();
+    let (nb_stdout, nb_stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
+    let (nb_stderr, nb_stderr_guard) = tracing_appender::non_blocking(std::io::stderr());
+
+    // default setting:
+    // (after filtering, controlled by env_filter)
+    // TRACE -> stdout
+    // DEBUG -> stdout
+    // INFO  -> stdout, stdout logfile (if enabled)
+    // WARN  -> stdout, stdout logfile (if enabled)
+    // ERROR -> stderr, stderr logfile (if enabled)
+
+    let mk_writer = nb_stdout
+        .with_max_level(Level::TRACE)
+        .with_min_level(Level::WARN)
+        .and(nb_stderr.with_max_level(Level::ERROR));
+
+    let mut guards = vec![nb_stderr_guard, nb_stdout_guard];
+
     if let Some(logfile_prefix) = &config.log_file {
-        let file_appender = tracing_appender::rolling::daily("", logfile_prefix);
-        tracing_appender::non_blocking(file_appender)
+        let (nb_stdout_file, nb_stdout_file_guard) = tracing_appender::non_blocking(
+            tracing_appender::rolling::daily(&cur_dir, format!("{logfile_prefix}.stdout")),
+        );
+        guards.push(nb_stdout_file_guard);
+        let (nb_stderr_file, nb_stderr_file_guard) = tracing_appender::non_blocking(
+            tracing_appender::rolling::daily(&cur_dir, format!("{logfile_prefix}.stderr")),
+        );
+        guards.push(nb_stderr_file_guard);
+        let mk_writer = mk_writer
+            .and(nb_stderr_file.with_max_level(Level::ERROR))
+            .and(
+                nb_stdout_file
+                    .with_max_level(Level::INFO)
+                    .with_min_level(Level::WARN),
+            );
+
+        (BoxMakeWriter::new(mk_writer), guards)
     } else {
-        tracing_appender::non_blocking(std::io::stdout())
+        (BoxMakeWriter::new(mk_writer), guards)
     }
 }
 
@@ -135,7 +175,6 @@ where
         .with_auto_split_batch(true) // Auto split batches so they fit under packet size
         .install_batch(opentelemetry::runtime::Tokio)
         .expect("Could not create async Tracer");
-
     // Create a tracing subscriber with the configured tracer
     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
@@ -155,14 +194,14 @@ pub fn init(config: TelemetryConfig) -> TelemetryGuards {
     let log_level = config.log_level.clone().unwrap_or_else(|| "info".into());
     let env_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
-    let (nb_output, worker_guard) = get_output(&config);
+    let (writer, worker_guards) = get_output(&config);
 
     #[allow(unused_mut)]
     let mut chrome_guard = None;
 
     if config.json_log_output {
         #[cfg(feature = "json")]
-        bunyan_json_subscriber(&config, env_filter, nb_output);
+        bunyan_json_subscriber(&config, env_filter, writer);
         #[cfg(not(feature = "json"))]
         panic!("Cannot enable JSON log output because json package feature is not enabled");
     } else if config.tokio_console {
@@ -184,7 +223,7 @@ pub fn init(config: TelemetryConfig) -> TelemetryGuards {
         // Output to file or to stdout with ANSI colors
         let fmt_layer = fmt::layer()
             .with_ansi(config.log_file.is_none())
-            .with_writer(nb_output);
+            .with_writer(writer);
 
         // Standard env filter (RUST_LOG) with standard formatter
         let subscriber = Registry::default().with(env_filter).with(fmt_layer);
@@ -203,7 +242,7 @@ pub fn init(config: TelemetryConfig) -> TelemetryGuards {
 
     // The guard must be returned and kept in the main fn of the app, as when it's dropped then the output
     // gets flushed and closed. If this is dropped too early then no output will appear!
-    TelemetryGuards(worker_guard, chrome_guard)
+    TelemetryGuards(worker_guards, chrome_guard)
 }
 
 #[cfg(test)]
