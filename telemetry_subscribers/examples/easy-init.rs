@@ -6,6 +6,7 @@ use tracing::{debug, info, warn};
 fn main() {
     let config = telemetry_subscribers::TelemetryConfig {
         service_name: "my_app".into(),
+        log_file: Some("my_app".into()),
         ..Default::default()
     };
     let _guard = telemetry_subscribers::init(config);
