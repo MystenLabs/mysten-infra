@@ -456,6 +456,50 @@ pub fn open_cf_opts<P: AsRef<Path>>(
     Ok(rocksdb)
 }
 
+/// Opens a database with options, and a number of column families with individual options that are created if they do not exist.
+pub fn open_cf_opts_secondary<P: AsRef<Path>>(
+    primary_path: P,
+    secondary_path: P,
+    db_options: Option<rocksdb::Options>,
+    opt_cfs: &[(&str, &rocksdb::Options)],
+) -> Result<Arc<rocksdb::DBWithThreadMode<MultiThreaded>>, TypedStoreError> {
+    // Customize database options
+    let mut options = db_options.unwrap_or_default();
+
+    let mut opt_cfs: std::collections::HashMap<_, _> = opt_cfs.iter().cloned().collect();
+    let cfs = rocksdb::DBWithThreadMode::<MultiThreaded>::list_cf(&options, &primary_path)
+        .ok()
+        .unwrap_or_default();
+
+    let default_rocksdb_options = rocksdb::Options::default();
+    // Add CFs not explicitly listed
+    for cf_key in cfs.iter() {
+        if !opt_cfs.contains_key(&cf_key[..]) {
+            opt_cfs.insert(cf_key, &default_rocksdb_options);
+        }
+    }
+
+    let primary_path = primary_path.as_ref().to_path_buf();
+    let secondary_path = secondary_path.as_ref().to_path_buf();
+
+    let rocksdb = {
+        options.create_if_missing(true);
+        options.create_missing_column_families(true);
+        Arc::new(
+            rocksdb::DBWithThreadMode::<MultiThreaded>::open_cf_descriptors_as_secondary(
+                &options,
+                &primary_path,
+                &secondary_path,
+                opt_cfs
+                    .iter()
+                    .map(|(name, opts)| ColumnFamilyDescriptor::new(*name, (*opts).clone())),
+            )?,
+        )
+    };
+    Ok(rocksdb)
+}
+
+
 /// TODO: Good description of why we're doing this : RocksDB stores keys in BE and has a seek operator on iterators, see https://github.com/facebook/rocksdb/wiki/Iterator#introduction
 #[inline]
 pub(crate) fn be_fix_int_ser<S>(t: &S) -> Result<Vec<u8>, TypedStoreError>
