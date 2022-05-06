@@ -6,6 +6,7 @@ authors = ["Francois Garillot <francois@mystenlabs.com>"]
 description = "tools for rustls-based certificate verification using pre-shared public keys"
 repository = "https://github.com/mystenlabs/mysten-infra"
 edition = "2021"
+publish = false
 
 [dependencies]
 rustls = { version = "0.20.2", default-features = false, features = ["logging", "dangerous_configuration"] }

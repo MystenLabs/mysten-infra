@@ -6,6 +6,7 @@ authors = ["Evan Chan <echan@mystenlabs.com>"]
 description = "Library for common telemetry and observability functionality"
 repository = "https://github.com/mystenlabs/mysten-infra"
 edition = "2021"
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
