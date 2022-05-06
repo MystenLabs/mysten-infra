@@ -1,5 +1,5 @@
 [package]
-name = "name_variant"
+name = "name-variant"
 version = "1.0.0"
 authors = ["Francois Garillot <francois@mystenlabs.com>"]
 edition = "2021"
