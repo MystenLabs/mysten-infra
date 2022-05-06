@@ -6,6 +6,7 @@ authors = ["Francois Garillot <francois@mystenlabs.com>"]
 description = "a typed database interface"
 repository = "https://github.com/mystenlabs/mysten-infra"
 edition = "2021"
+publish = false
 
 [dependencies]
 # deactivation of bzip2 due to https://github.com/rust-rocksdb/rust-rocksdb/issues/609
