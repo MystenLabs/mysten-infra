@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Supervisor","A Supervisor is instantiated to supervise a task that should always be running. A running supervisor will start a component task, and ensure that it is restarted if it ever stops."]],"trait":[["Manageable","In order to be Manageable, a user defines the following two functions:"]],"type":[["IrrecoverableError",""]]});

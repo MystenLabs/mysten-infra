@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["init","Initialize telemetry subscribers based on TelemetryConfig NOTE: You must keep the returned guard and not drop it until the end of the program, otherwise logs will not appear!!"]],"struct":[["TelemetryConfig","Configuration for different logging/tracing options"],["TelemetryGuards",""]]});

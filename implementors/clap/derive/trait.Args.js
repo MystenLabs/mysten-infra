@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["x"] = [{"text":"impl Args for <a class=\"struct\" href=\"x/lint/struct.Args.html\" title=\"struct x::lint::Args\">Args</a>","synthetic":false,"types":["x::lint::Args"]},{"text":"impl Args for <a class=\"struct\" href=\"x/struct.Args.html\" title=\"struct x::Args\">Args</a>","synthetic":false,"types":["x::Args"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
