@@ -17,3 +17,4 @@ tokio-stream = { version = "0.1", features = ["net"] }
 tonic = { version = "0.7", features = ["transport"] }
 tonic-health = "0.6.0"
 tower = { version = "0.4", features = ["full"] }
+pin-project = "1.0.10"

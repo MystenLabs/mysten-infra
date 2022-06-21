@@ -1,6 +1,7 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::metrics::{MetricsRequestCallback, RequestMetricsLayer};
 use crate::{
     config::Config,
     multiaddr::{parse_dns, parse_ip4, parse_ip6},
@@ -34,14 +35,17 @@ pub struct ServerBuilder {
 
 type WrapperService = Stack<
     Stack<
-        Either<LoadShedLayer, Identity>,
-        Stack<Either<GlobalConcurrencyLimitLayer, Identity>, Identity>,
+        Either<RequestMetricsLayer, Identity>,
+        Stack<
+            Either<LoadShedLayer, Identity>,
+            Stack<Either<GlobalConcurrencyLimitLayer, Identity>, Identity>,
+        >,
     >,
     Identity,
 >;
 
 impl ServerBuilder {
-    pub fn from_config(config: &Config) -> Self {
+    pub fn from_config(config: &Config, metrics_provider: Option<MetricsRequestCallback>) -> Self {
         let mut builder = tonic::transport::server::Server::builder();
 
         if let Some(limit) = config.concurrency_limit_per_connection {
@@ -62,6 +66,8 @@ impl ServerBuilder {
             None
         };
 
+        let request_metrics = metrics_provider.map(RequestMetricsLayer::new);
+
         let global_concurrency_limit = config
             .global_concurrency_limit
             .map(tower::limit::GlobalConcurrencyLimitLayer::new);
@@ -69,6 +75,7 @@ impl ServerBuilder {
         let layer = ServiceBuilder::new()
             .option_layer(global_concurrency_limit)
             .option_layer(load_shed)
+            .option_layer(request_metrics)
             .into_inner();
 
         let (health_reporter, health_service) = tonic_health::server::health_reporter();
@@ -226,6 +233,7 @@ mod test {
     use crate::config::Config;
     use multiaddr::multiaddr;
     use multiaddr::Multiaddr;
+    use std::time::Duration;
     use tonic_health::proto::health_client::HealthClient;
     use tonic_health::proto::HealthCheckRequest;
 
@@ -238,6 +246,42 @@ mod test {
         // But it doesn't round-trip in the human readable format
         let s = addr.to_string();
         assert!(s.parse::<Multiaddr>().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_metrics() {
+        let address: Multiaddr = "/ip4/127.0.0.1/tcp/0/http".parse().unwrap();
+
+        let config = Config::new();
+        let metrics = |path: String, latency: Duration, status: u16| {
+            println!(
+                "Coming from metrics function: {} {} {}",
+                path,
+                latency.as_millis(),
+                status
+            );
+        };
+        let mut server = config
+            .server_builder_with_metrics(metrics)
+            .bind(&address)
+            .await
+            .unwrap();
+
+        let address = server.local_addr().to_owned();
+        let cancel_handle = server.take_cancel_handle().unwrap();
+        let server_handle = tokio::spawn(server.serve());
+        let channel = config.connect(&address).await.unwrap();
+        let mut client = HealthClient::new(channel);
+
+        client
+            .check(HealthCheckRequest {
+                service: "".to_owned(),
+            })
+            .await
+            .unwrap();
+
+        cancel_handle.send(()).unwrap();
+        server_handle.await.unwrap().unwrap();
     }
 
     async fn test_multiaddr(address: Multiaddr) {

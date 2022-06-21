@@ -1,6 +1,7 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::metrics::MetricsRequestCallback;
 use crate::{
     client::{connect_lazy_with_config, connect_with_config},
     server::ServerBuilder,
@@ -80,7 +81,13 @@ impl Config {
     }
 
     pub fn server_builder(&self) -> ServerBuilder {
-        ServerBuilder::from_config(self)
+        ServerBuilder::from_config(self, None)
+    }
+
+    /// Creating a server builder with a callback function to use for
+    /// metrics. The function will be called on every completed request.
+    pub fn server_builder_with_metrics(&self, callback: MetricsRequestCallback) -> ServerBuilder {
+        ServerBuilder::from_config(self, Some(callback))
     }
 
     pub async fn connect(&self, addr: &Multiaddr) -> Result<Channel> {
