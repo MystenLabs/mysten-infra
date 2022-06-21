@@ -1,14 +1,16 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::metrics::{MetricsRequestCallback, RequestMetricsLayer};
+use crate::metrics::RequestMetricsLayer;
 use crate::{
     config::Config,
     multiaddr::{parse_dns, parse_ip4, parse_ip6},
+    MetricsCallbackProvider,
 };
 use anyhow::{anyhow, Result};
 use futures::FutureExt;
 use multiaddr::{Multiaddr, Protocol};
+use std::sync::Arc;
 use std::{convert::Infallible, net::SocketAddr};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio_stream::wrappers::TcpListenerStream;
@@ -28,14 +30,14 @@ use tower::{
     Service, ServiceBuilder,
 };
 
-pub struct ServerBuilder {
-    router: Router<WrapperService>,
+pub struct ServerBuilder<M: MetricsCallbackProvider = ()> {
+    router: Router<WrapperService<M>>,
     health_reporter: tonic_health::server::HealthReporter,
 }
 
-type WrapperService = Stack<
+type WrapperService<M> = Stack<
     Stack<
-        Either<RequestMetricsLayer, Identity>,
+        Either<RequestMetricsLayer<M>, Identity>,
         Stack<
             Either<LoadShedLayer, Identity>,
             Stack<Either<GlobalConcurrencyLimitLayer, Identity>, Identity>,
@@ -44,8 +46,8 @@ type WrapperService = Stack<
     Identity,
 >;
 
-impl ServerBuilder {
-    pub fn from_config(config: &Config, metrics_provider: Option<MetricsRequestCallback>) -> Self {
+impl<M: MetricsCallbackProvider> ServerBuilder<M> {
+    pub fn from_config(config: &Config, metrics_provider: Option<Arc<M>>) -> Self {
         let mut builder = tonic::transport::server::Server::builder();
 
         if let Some(limit) = config.concurrency_limit_per_connection {
@@ -231,9 +233,12 @@ fn update_tcp_port_in_multiaddr(addr: &Multiaddr, port: u16) -> Multiaddr {
 #[cfg(test)]
 mod test {
     use crate::config::Config;
+    use crate::MetricsCallbackProvider;
     use multiaddr::multiaddr;
     use multiaddr::Multiaddr;
-    use std::time::Duration;
+    use std::ops::Deref;
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
     use tonic_health::proto::health_client::HealthClient;
     use tonic_health::proto::HealthCheckRequest;
 
@@ -249,20 +254,33 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_metrics() {
+    async fn test_metrics_layer() {
         let address: Multiaddr = "/ip4/127.0.0.1/tcp/0/http".parse().unwrap();
 
         let config = Config::new();
-        let metrics = |path: String, latency: Duration, status: u16| {
-            println!(
-                "Coming from metrics function: {} {} {}",
-                path,
-                latency.as_millis(),
-                status
-            );
+
+        #[derive(Clone)]
+        struct Metrics {
+            /// a flag to figure out whether the
+            /// on_request method has been called.
+            metrics_called: Arc<Mutex<bool>>,
+        }
+
+        impl MetricsCallbackProvider for Metrics {
+            fn on_request(&self, path: String, _start_time: Instant, status: u16) {
+                assert_eq!(path, "/grpc.health.v1.Health/Check");
+                assert_eq!(status, 200);
+                let mut m = self.metrics_called.lock().unwrap();
+                *m = true
+            }
+        }
+
+        let metrics = Metrics {
+            metrics_called: Arc::new(Mutex::new(false)),
         };
+
         let mut server = config
-            .server_builder_with_metrics(metrics)
+            .server_builder(Some(Arc::new(metrics.clone())))
             .bind(&address)
             .await
             .unwrap();
@@ -282,11 +300,17 @@ mod test {
 
         cancel_handle.send(()).unwrap();
         server_handle.await.unwrap().unwrap();
+
+        assert!(metrics.metrics_called.lock().unwrap().deref());
     }
 
     async fn test_multiaddr(address: Multiaddr) {
         let config = Config::new();
-        let mut server = config.server_builder().bind(&address).await.unwrap();
+        let mut server = config
+            .server_builder::<()>(None)
+            .bind(&address)
+            .await
+            .unwrap();
         let address = server.local_addr().to_owned();
         let cancel_handle = server.take_cancel_handle().unwrap();
         let server_handle = tokio::spawn(server.serve());

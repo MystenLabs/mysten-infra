@@ -1,43 +1,40 @@
+use crate::MetricsCallbackProvider;
 use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tonic::codegen::http::{Request, Response};
 use tower::{Layer, Service};
 
-/// A function called on every performed request (completed)
-/// where various information are passed useful for metrics
-/// purposes.
-pub type MetricsRequestCallback = fn(path: String, latency: Duration, status: u16);
-
 #[derive(Clone)]
-pub struct RequestMetricsLayer {
-    metrics_callback: MetricsRequestCallback,
+pub struct RequestMetricsLayer<M: MetricsCallbackProvider> {
+    metrics_callback: Arc<M>,
 }
 
-impl RequestMetricsLayer {
-    pub fn new(metrics_callback: MetricsRequestCallback) -> Self {
+impl<M: MetricsCallbackProvider> RequestMetricsLayer<M> {
+    pub fn new(metrics_callback: Arc<M>) -> Self {
         RequestMetricsLayer { metrics_callback }
     }
 }
 
-impl<S> Layer<S> for RequestMetricsLayer {
-    type Service = RequestMetrics<S>;
+impl<S, M: MetricsCallbackProvider> Layer<S> for RequestMetricsLayer<M> {
+    type Service = RequestMetrics<S, M>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        RequestMetrics::new(inner, self.metrics_callback)
+        RequestMetrics::new(inner, self.metrics_callback.clone())
     }
 }
 
 #[derive(Clone)]
-pub struct RequestMetrics<S> {
+pub struct RequestMetrics<S, M: MetricsCallbackProvider> {
     inner: S,
-    metrics_callback: MetricsRequestCallback,
+    metrics_callback: Arc<M>,
 }
 
-impl<S> RequestMetrics<S> {
-    pub fn new(inner: S, metrics_callback: MetricsRequestCallback) -> Self {
+impl<S, M: MetricsCallbackProvider> RequestMetrics<S, M> {
+    pub fn new(inner: S, metrics_callback: Arc<M>) -> Self {
         RequestMetrics {
             inner,
             metrics_callback,
@@ -45,44 +42,45 @@ impl<S> RequestMetrics<S> {
     }
 }
 
-impl<S, ReqBody, ResBody> Service<Request<ReqBody>> for RequestMetrics<S>
+impl<S, ReqBody, ResBody, M: MetricsCallbackProvider> Service<Request<ReqBody>>
+    for RequestMetrics<S, M>
 where
     S: Service<Request<ReqBody>, Response = Response<ResBody>>,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = ResponseFuture<S::Future>;
+    type Future = ResponseFuture<S::Future, M>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
-        let start = Instant::now();
+        let start_time = Instant::now();
         let path = req.uri().path().to_owned();
 
         ResponseFuture {
             response_future: self.inner.call(req),
             path,
-            start,
-            metrics_callback: self.metrics_callback,
+            start_time,
+            metrics_callback: self.metrics_callback.clone(),
         }
     }
 }
 
 #[pin_project]
-pub struct ResponseFuture<F> {
+pub struct ResponseFuture<F, M> {
     #[pin]
     response_future: F,
     #[pin]
     path: String,
     #[pin]
-    start: Instant,
+    start_time: Instant,
     #[pin]
-    metrics_callback: MetricsRequestCallback,
+    metrics_callback: Arc<M>,
 }
 
-impl<F, ResBody, E> Future for ResponseFuture<F>
+impl<F, ResBody, E, M: MetricsCallbackProvider> Future for ResponseFuture<F, M>
 where
     F: Future<Output = Result<Response<ResBody>, E>>,
 {
@@ -93,11 +91,11 @@ where
 
         match this.response_future.poll(cx) {
             Poll::Ready(Ok(res)) => {
-                let latency = this.start.elapsed();
+                let start_time = this.start_time;
                 let status = res.status().as_u16();
                 let path = this.path.to_string();
 
-                (this.metrics_callback)(path, latency, status);
+                this.metrics_callback.on_request(path, *start_time, status);
 
                 Poll::Ready(Ok(res))
             }
