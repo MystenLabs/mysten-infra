@@ -255,10 +255,6 @@ mod test {
 
     #[tokio::test]
     async fn test_metrics_layer() {
-        let address: Multiaddr = "/ip4/127.0.0.1/tcp/0/http".parse().unwrap();
-
-        let config = Config::new();
-
         #[derive(Clone)]
         struct Metrics {
             /// a flag to figure out whether the
@@ -278,6 +274,9 @@ mod test {
         let metrics = Metrics {
             metrics_called: Arc::new(Mutex::new(false)),
         };
+
+        let address: Multiaddr = "/ip4/127.0.0.1/tcp/0/http".parse().unwrap();
+        let config = Config::new();
 
         let mut server = config
             .server_builder(Some(Arc::new(metrics.clone())))

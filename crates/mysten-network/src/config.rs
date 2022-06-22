@@ -80,8 +80,7 @@ impl Config {
         Default::default()
     }
 
-    /// Creating a server builder with a callback function to use for
-    /// metrics. The function will be called on every completed request.
+    /// Creating a server builder with a metrics callback provider as optional.
     pub fn server_builder<M: MetricsCallbackProvider>(
         &self,
         callback: Option<Arc<M>>,
