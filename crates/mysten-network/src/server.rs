@@ -1,19 +1,17 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
-
-use crate::metrics::RequestMetricsLayer;
+use crate::metrics::{MetricsCallbackProvider, MetricsHandler, GRPC_ENDPOINT_PATH_HEADER};
 use crate::{
     config::Config,
     multiaddr::{parse_dns, parse_ip4, parse_ip6},
-    MetricsCallbackProvider,
 };
 use anyhow::{anyhow, Result};
 use futures::FutureExt;
 use multiaddr::{Multiaddr, Protocol};
-use std::sync::Arc;
 use std::{convert::Infallible, net::SocketAddr};
 use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio_stream::wrappers::TcpListenerStream;
+use tonic::codegen::http::HeaderValue;
 use tonic::{
     body::BoxBody,
     codegen::{
@@ -29,25 +27,42 @@ use tower::{
     util::Either,
     Service, ServiceBuilder,
 };
+use tower_http::classify::{GrpcErrorsAsFailures, SharedClassifier};
+use tower_http::propagate_header::PropagateHeaderLayer;
+use tower_http::set_header::SetRequestHeaderLayer;
+use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 
-pub struct ServerBuilder<M: MetricsCallbackProvider = ()> {
+pub struct ServerBuilder<M: MetricsCallbackProvider> {
     router: Router<WrapperService<M>>,
     health_reporter: tonic_health::server::HealthReporter,
 }
 
+type AddPathToHeaderFunction = fn(&Request<Body>) -> Option<HeaderValue>;
+
 type WrapperService<M> = Stack<
     Stack<
-        Either<RequestMetricsLayer<M>, Identity>,
+        PropagateHeaderLayer,
         Stack<
-            Either<LoadShedLayer, Identity>,
-            Stack<Either<GlobalConcurrencyLimitLayer, Identity>, Identity>,
+            TraceLayer<
+                SharedClassifier<GrpcErrorsAsFailures>,
+                DefaultMakeSpan,
+                MetricsHandler<M>,
+                MetricsHandler<M>,
+            >,
+            Stack<
+                SetRequestHeaderLayer<AddPathToHeaderFunction>,
+                Stack<
+                    Either<LoadShedLayer, Identity>,
+                    Stack<Either<GlobalConcurrencyLimitLayer, Identity>, Identity>,
+                >,
+            >,
         >,
     >,
     Identity,
 >;
 
 impl<M: MetricsCallbackProvider> ServerBuilder<M> {
-    pub fn from_config(config: &Config, metrics_provider: Option<Arc<M>>) -> Self {
+    pub fn from_config(config: &Config, metrics_provider: Option<M>) -> Self {
         let mut builder = tonic::transport::server::Server::builder();
 
         if let Some(limit) = config.concurrency_limit_per_connection {
@@ -68,16 +83,30 @@ impl<M: MetricsCallbackProvider> ServerBuilder<M> {
             None
         };
 
-        let request_metrics = metrics_provider.map(RequestMetricsLayer::new);
+        let metrics = MetricsHandler { metrics_provider };
+
+        let request_metrics = TraceLayer::new_for_grpc()
+            .on_request(metrics.clone())
+            .on_response(metrics);
 
         let global_concurrency_limit = config
             .global_concurrency_limit
             .map(tower::limit::GlobalConcurrencyLimitLayer::new);
 
+        fn add_path_to_request_header(request: &Request<Body>) -> Option<HeaderValue> {
+            let path = request.uri().path();
+            Some(HeaderValue::from_str(path).unwrap())
+        }
+
         let layer = ServiceBuilder::new()
             .option_layer(global_concurrency_limit)
             .option_layer(load_shed)
-            .option_layer(request_metrics)
+            .layer(SetRequestHeaderLayer::overriding(
+                GRPC_ENDPOINT_PATH_HEADER.clone(),
+                add_path_to_request_header as AddPathToHeaderFunction,
+            ))
+            .layer(request_metrics)
+            .layer(PropagateHeaderLayer::new(GRPC_ENDPOINT_PATH_HEADER.clone()))
             .into_inner();
 
         let (health_reporter, health_service) = tonic_health::server::health_reporter();
@@ -233,12 +262,12 @@ fn update_tcp_port_in_multiaddr(addr: &Multiaddr, port: u16) -> Multiaddr {
 #[cfg(test)]
 mod test {
     use crate::config::Config;
-    use crate::MetricsCallbackProvider;
+    use crate::metrics::MetricsCallbackProvider;
     use multiaddr::multiaddr;
     use multiaddr::Multiaddr;
     use std::ops::Deref;
     use std::sync::{Arc, Mutex};
-    use std::time::Instant;
+    use std::time::Duration;
     use tonic_health::proto::health_client::HealthClient;
     use tonic_health::proto::HealthCheckRequest;
 
@@ -263,7 +292,13 @@ mod test {
         }
 
         impl MetricsCallbackProvider for Metrics {
-            fn on_request(&self, path: String, _start_time: Instant, status: u16) {
+            fn on_request(&self, path: String) {
+                println!("Got here from request: {}", path);
+            }
+
+            fn on_response(&self, path: String, latency: Duration, status: u16) {
+                println!("Got here from response: {} {}", path, latency.as_secs_f64());
+
                 assert_eq!(path, "/grpc.health.v1.Health/Check");
                 assert_eq!(status, 200);
                 let mut m = self.metrics_called.lock().unwrap();
@@ -279,7 +314,7 @@ mod test {
         let config = Config::new();
 
         let mut server = config
-            .server_builder(Some(Arc::new(metrics.clone())))
+            .server_builder(Some(metrics.clone()))
             .bind(&address)
             .await
             .unwrap();

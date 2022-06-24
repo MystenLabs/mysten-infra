@@ -1,10 +1,9 @@
-use std::sync::Arc;
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
+use crate::metrics::MetricsCallbackProvider;
 use crate::{
     client::{connect_lazy_with_config, connect_with_config},
     server::ServerBuilder,
-    MetricsCallbackProvider,
 };
 use anyhow::Result;
 use multiaddr::Multiaddr;
@@ -81,11 +80,11 @@ impl Config {
     }
 
     /// Creating a server builder with a metrics callback provider as optional.
-    pub fn server_builder<M: MetricsCallbackProvider>(
-        &self,
-        callback: Option<Arc<M>>,
-    ) -> ServerBuilder<M> {
-        ServerBuilder::from_config(self, callback)
+    pub fn server_builder<M>(&self, metrics_provider: Option<M>) -> ServerBuilder<M>
+    where
+        M: MetricsCallbackProvider,
+    {
+        ServerBuilder::from_config(self, metrics_provider)
     }
 
     pub async fn connect(&self, addr: &Multiaddr) -> Result<Channel> {
