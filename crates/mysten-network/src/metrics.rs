@@ -27,7 +27,9 @@ pub trait MetricsCallbackProvider: Send + Sync + Clone + 'static {
     fn on_response(&self, path: String, latency: Duration, status: u16);
 }
 
-impl MetricsCallbackProvider for () {
+#[derive(Clone, Default)]
+pub struct DefaultMetricsCallbackProvider {}
+impl MetricsCallbackProvider for DefaultMetricsCallbackProvider {
     fn on_request(&self, _path: String) {}
 
     fn on_response(&self, _path: String, _latency: Duration, _status: u16) {}
@@ -35,31 +37,27 @@ impl MetricsCallbackProvider for () {
 
 #[derive(Clone)]
 pub(crate) struct MetricsHandler<M: MetricsCallbackProvider> {
-    pub(crate) metrics_provider: Option<M>,
+    pub(crate) metrics_provider: M,
 }
 
 impl<B, M: MetricsCallbackProvider> OnResponse<B> for MetricsHandler<M> {
     fn on_response(self, response: &Response<B>, latency: Duration, _span: &Span) {
-        if let Some(provider) = &self.metrics_provider {
-            let path: HeaderValue = response
-                .headers()
-                .get(&GRPC_ENDPOINT_PATH_HEADER)
-                .unwrap()
-                .clone();
+        let path: HeaderValue = response
+            .headers()
+            .get(&GRPC_ENDPOINT_PATH_HEADER)
+            .unwrap()
+            .clone();
 
-            provider.on_response(
-                path.to_str().unwrap().to_string(),
-                latency,
-                response.status().as_u16(),
-            );
-        }
+        self.metrics_provider.on_response(
+            path.to_str().unwrap().to_string(),
+            latency,
+            response.status().as_u16(),
+        );
     }
 }
 
 impl<B, M: MetricsCallbackProvider> OnRequest<B> for MetricsHandler<M> {
     fn on_request(&mut self, request: &Request<B>, _span: &Span) {
-        if let Some(provider) = &self.metrics_provider {
-            provider.on_request(request.uri().to_string());
-        }
+        self.metrics_provider.on_request(request.uri().to_string());
     }
 }

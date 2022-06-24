@@ -1,6 +1,9 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
-use crate::metrics::{MetricsCallbackProvider, MetricsHandler, GRPC_ENDPOINT_PATH_HEADER};
+use crate::metrics::{
+    DefaultMetricsCallbackProvider, MetricsCallbackProvider, MetricsHandler,
+    GRPC_ENDPOINT_PATH_HEADER,
+};
 use crate::{
     config::Config,
     multiaddr::{parse_dns, parse_ip4, parse_ip6},
@@ -32,7 +35,7 @@ use tower_http::propagate_header::PropagateHeaderLayer;
 use tower_http::set_header::SetRequestHeaderLayer;
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 
-pub struct ServerBuilder<M: MetricsCallbackProvider> {
+pub struct ServerBuilder<M: MetricsCallbackProvider = DefaultMetricsCallbackProvider> {
     router: Router<WrapperService<M>>,
     health_reporter: tonic_health::server::HealthReporter,
 }
@@ -62,7 +65,7 @@ type WrapperService<M> = Stack<
 >;
 
 impl<M: MetricsCallbackProvider> ServerBuilder<M> {
-    pub fn from_config(config: &Config, metrics_provider: Option<M>) -> Self {
+    pub fn from_config(config: &Config, metrics_provider: M) -> Self {
         let mut builder = tonic::transport::server::Server::builder();
 
         if let Some(limit) = config.concurrency_limit_per_connection {
@@ -314,7 +317,7 @@ mod test {
         let config = Config::new();
 
         let mut server = config
-            .server_builder(Some(metrics.clone()))
+            .server_builder_with_metrics(metrics.clone())
             .bind(&address)
             .await
             .unwrap();
@@ -340,11 +343,7 @@ mod test {
 
     async fn test_multiaddr(address: Multiaddr) {
         let config = Config::new();
-        let mut server = config
-            .server_builder::<()>(None)
-            .bind(&address)
-            .await
-            .unwrap();
+        let mut server = config.server_builder().bind(&address).await.unwrap();
         let address = server.local_addr().to_owned();
         let cancel_handle = server.take_cancel_handle().unwrap();
         let server_handle = tokio::spawn(server.serve());
