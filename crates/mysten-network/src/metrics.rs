@@ -3,6 +3,7 @@
 use std::time::Duration;
 use tonic::codegen::http::header::HeaderName;
 use tonic::codegen::http::{HeaderValue, Request, Response};
+use tonic::{Code, Status};
 use tower_http::trace::{OnRequest, OnResponse};
 use tracing::Span;
 
@@ -24,7 +25,8 @@ pub trait MetricsCallbackProvider: Send + Sync + Clone + 'static {
     /// `path`: the endpoint uri path
     /// `latency`: the time when the request was received and when the response was created
     /// `status`: the http status code of the response
-    fn on_response(&self, path: String, latency: Duration, status: u16);
+    /// `grpc_status_code`: the grpc status code (see https://github.com/grpc/grpc/blob/master/doc/statuscodes.md#status-codes-and-their-use-in-grpc)
+    fn on_response(&self, path: String, latency: Duration, status: u16, grpc_status_code: Code);
 }
 
 #[derive(Clone, Default)]
@@ -32,16 +34,32 @@ pub struct DefaultMetricsCallbackProvider {}
 impl MetricsCallbackProvider for DefaultMetricsCallbackProvider {
     fn on_request(&self, _path: String) {}
 
-    fn on_response(&self, _path: String, _latency: Duration, _status: u16) {}
+    fn on_response(
+        &self,
+        _path: String,
+        _latency: Duration,
+        _status: u16,
+        _grpc_status_code: Code,
+    ) {
+    }
 }
 
 #[derive(Clone)]
 pub(crate) struct MetricsHandler<M: MetricsCallbackProvider> {
-    pub(crate) metrics_provider: M,
+    metrics_provider: M,
+}
+
+impl<M: MetricsCallbackProvider> MetricsHandler<M> {
+    pub(crate) fn new(metrics_provider: M) -> Self {
+        Self { metrics_provider }
+    }
 }
 
 impl<B, M: MetricsCallbackProvider> OnResponse<B> for MetricsHandler<M> {
     fn on_response(self, response: &Response<B>, latency: Duration, _span: &Span) {
+        let grpc_status = Status::from_header_map(response.headers());
+        let grpc_status_code = grpc_status.map_or(Code::Ok, |s| s.code());
+
         let path: HeaderValue = response
             .headers()
             .get(&GRPC_ENDPOINT_PATH_HEADER)
@@ -52,12 +70,14 @@ impl<B, M: MetricsCallbackProvider> OnResponse<B> for MetricsHandler<M> {
             path.to_str().unwrap().to_string(),
             latency,
             response.status().as_u16(),
+            grpc_status_code,
         );
     }
 }
 
 impl<B, M: MetricsCallbackProvider> OnRequest<B> for MetricsHandler<M> {
     fn on_request(&mut self, request: &Request<B>, _span: &Span) {
-        self.metrics_provider.on_request(request.uri().to_string());
+        self.metrics_provider
+            .on_request(request.uri().path().to_string());
     }
 }

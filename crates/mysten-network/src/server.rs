@@ -86,7 +86,7 @@ impl<M: MetricsCallbackProvider> ServerBuilder<M> {
             None
         };
 
-        let metrics = MetricsHandler { metrics_provider };
+        let metrics = MetricsHandler::new(metrics_provider);
 
         let request_metrics = TraceLayer::new_for_grpc()
             .on_request(metrics.clone())
@@ -271,6 +271,7 @@ mod test {
     use std::ops::Deref;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+    use tonic::Code;
     use tonic_health::proto::health_client::HealthClient;
     use tonic_health::proto::HealthCheckRequest;
 
@@ -286,7 +287,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_metrics_layer() {
+    async fn test_metrics_layer_successful() {
         #[derive(Clone)]
         struct Metrics {
             /// a flag to figure out whether the
@@ -296,14 +297,19 @@ mod test {
 
         impl MetricsCallbackProvider for Metrics {
             fn on_request(&self, path: String) {
-                println!("Got here from request: {}", path);
+                assert_eq!(path, "/grpc.health.v1.Health/Check");
             }
 
-            fn on_response(&self, path: String, latency: Duration, status: u16) {
-                println!("Got here from response: {} {}", path, latency.as_secs_f64());
-
+            fn on_response(
+                &self,
+                path: String,
+                _latency: Duration,
+                status: u16,
+                grpc_status_code: Code,
+            ) {
                 assert_eq!(path, "/grpc.health.v1.Health/Check");
                 assert_eq!(status, 200);
+                assert_eq!(grpc_status_code, Code::Ok);
                 let mut m = self.metrics_called.lock().unwrap();
                 *m = true
             }
@@ -334,6 +340,71 @@ mod test {
             })
             .await
             .unwrap();
+
+        cancel_handle.send(()).unwrap();
+        server_handle.await.unwrap().unwrap();
+
+        assert!(metrics.metrics_called.lock().unwrap().deref());
+    }
+
+    #[tokio::test]
+    async fn test_metrics_layer_error() {
+        #[derive(Clone)]
+        struct Metrics {
+            /// a flag to figure out whether the
+            /// on_request method has been called.
+            metrics_called: Arc<Mutex<bool>>,
+        }
+
+        impl MetricsCallbackProvider for Metrics {
+            fn on_request(&self, path: String) {
+                assert_eq!(path, "/grpc.health.v1.Health/Check");
+            }
+
+            fn on_response(
+                &self,
+                path: String,
+                _latency: Duration,
+                status: u16,
+                grpc_status_code: Code,
+            ) {
+                assert_eq!(path, "/grpc.health.v1.Health/Check");
+                assert_eq!(status, 200);
+                // According to https://github.com/grpc/grpc/blob/master/doc/statuscodes.md#status-codes-and-their-use-in-grpc
+                // code 5 is not_found , which is what we expect to get in this case
+                assert_eq!(grpc_status_code, Code::NotFound);
+                let mut m = self.metrics_called.lock().unwrap();
+                *m = true
+            }
+        }
+
+        let metrics = Metrics {
+            metrics_called: Arc::new(Mutex::new(false)),
+        };
+
+        let address: Multiaddr = "/ip4/127.0.0.1/tcp/0/http".parse().unwrap();
+        let config = Config::new();
+
+        let mut server = config
+            .server_builder_with_metrics(metrics.clone())
+            .bind(&address)
+            .await
+            .unwrap();
+
+        let address = server.local_addr().to_owned();
+        let cancel_handle = server.take_cancel_handle().unwrap();
+        let server_handle = tokio::spawn(server.serve());
+        let channel = config.connect(&address).await.unwrap();
+        let mut client = HealthClient::new(channel);
+
+        // Call the healthcheck for a service that doesn't exist
+        // that should give us back an error with code 5 (not_found)
+        // https://github.com/grpc/grpc/blob/master/doc/statuscodes.md#status-codes-and-their-use-in-grpc
+        let _ = client
+            .check(HealthCheckRequest {
+                service: "non-existing-service".to_owned(),
+            })
+            .await;
 
         cancel_handle.send(()).unwrap();
         server_handle.await.unwrap().unwrap();
