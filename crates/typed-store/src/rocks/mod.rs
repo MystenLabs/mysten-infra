@@ -197,7 +197,6 @@ impl DBBatch {
     }
 
     /// Consume the batch and write its operations to the database
-    #[instrument(level = "debug", skip_all, err)]
     pub fn write(self) -> Result<(), TypedStoreError> {
         self.rocksdb.write(self.batch)?;
         Ok(())
@@ -276,7 +275,6 @@ where
     type Keys = Keys<'a, K>;
     type Values = Values<'a, V>;
 
-    #[instrument(level = "debug", skip_all, err)]
     fn contains_key(&self, key: &K) -> Result<bool, TypedStoreError> {
         let key_buf = be_fix_int_ser(key)?;
         // [`rocksdb::DBWithThreadMode::key_may_exist_cf`] can have false positives,
@@ -285,7 +283,6 @@ where
             && self.rocksdb.get_pinned_cf(&self.cf(), &key_buf)?.is_some())
     }
 
-    #[instrument(level = "debug", skip_all, err)]
     fn get(&self, key: &K) -> Result<Option<V>, TypedStoreError> {
         let key_buf = be_fix_int_ser(key)?;
         let res = self.rocksdb.get_pinned_cf(&self.cf(), &key_buf)?;
@@ -295,7 +292,6 @@ where
         }
     }
 
-    #[instrument(level = "debug", skip_all, err)]
     fn insert(&self, key: &K, value: &V) -> Result<(), TypedStoreError> {
         let key_buf = be_fix_int_ser(key)?;
         let value_buf = bincode::serialize(value)?;
@@ -304,7 +300,6 @@ where
         Ok(())
     }
 
-    #[instrument(level = "debug", skip_all, err)]
     fn remove(&self, key: &K) -> Result<(), TypedStoreError> {
         let key_buf = be_fix_int_ser(key)?;
 
@@ -312,7 +307,6 @@ where
         Ok(())
     }
 
-    #[instrument(level = "debug", skip_all, err)]
     fn clear(&self) -> Result<(), TypedStoreError> {
         let _ = self.rocksdb.drop_cf(&self.cf);
         self.rocksdb
@@ -346,7 +340,6 @@ where
     }
 
     /// Returns a vector of values corresponding to the keys provided.
-    #[instrument(level = "debug", skip_all, err)]
     fn multi_get<J>(
         &self,
         keys: impl IntoIterator<Item = J>,
@@ -375,7 +368,6 @@ where
     }
 
     /// Convenience method for batch insertion
-    #[instrument(level = "debug", skip_all, err)]
     fn multi_insert<J, U>(
         &self,
         key_val_pairs: impl IntoIterator<Item = (J, U)>,
@@ -388,7 +380,6 @@ where
     }
 
     /// Convenience method for batch removal
-    #[instrument(level = "debug", skip_all, err)]
     fn multi_remove<J>(&self, keys: impl IntoIterator<Item = J>) -> Result<(), Self::Error>
     where
         J: Borrow<K>,
@@ -440,25 +431,37 @@ pub fn open_cf_opts<P: AsRef<Path>>(
     db_options: Option<rocksdb::Options>,
     opt_cfs: &[(&str, &rocksdb::Options)],
 ) -> Result<Arc<rocksdb::DBWithThreadMode<MultiThreaded>>, TypedStoreError> {
+    println!("BEGIN");
     // Customize database options
     let mut options = db_options.unwrap_or_default();
 
-    let mut opt_cfs: std::collections::HashMap<_, _> = opt_cfs.iter().cloned().collect();
-    let cfs = rocksdb::DBWithThreadMode::<MultiThreaded>::list_cf(&options, &path)
+    let opt_cfs: std::collections::HashMap<_, _> = opt_cfs.iter().cloned().collect();
+    /*
+    let cfs = {
+        let _span = tracing::debug_span!("list_cf");
+        rocksdb::DBWithThreadMode::<MultiThreaded>::list_cf(&options, &path)
         .ok()
-        .unwrap_or_default();
+        .unwrap_or_default()
+    };
 
     let default_rocksdb_options = rocksdb::Options::default();
+    {
+        println!("HAY");
+        let _span = tracing::debug_span!("build opts_cfs");
     // Add CFs not explicitly listed
     for cf_key in cfs.iter() {
         if !opt_cfs.contains_key(&cf_key[..]) {
             opt_cfs.insert(cf_key, &default_rocksdb_options);
         }
     }
+    }
+    */
 
     let primary = path.as_ref().to_path_buf();
 
+    println!("whoa");
     let rocksdb = {
+        let _span = tracing::debug_span!("rocksdb::DBWithThreadMode::<MultiThreaded>::open_cf_descriptors");
         options.create_if_missing(true);
         options.create_missing_column_families(true);
         Arc::new(
@@ -471,6 +474,7 @@ pub fn open_cf_opts<P: AsRef<Path>>(
             )?,
         )
     };
+    println!("/whoa");
     Ok(rocksdb)
 }
 
