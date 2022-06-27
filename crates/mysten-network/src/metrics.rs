@@ -4,7 +4,8 @@ use std::time::Duration;
 use tonic::codegen::http::header::HeaderName;
 use tonic::codegen::http::{HeaderValue, Request, Response};
 use tonic::{Code, Status};
-use tower_http::trace::{OnRequest, OnResponse};
+use tower_http::classify::GrpcFailureClass;
+use tower_http::trace::{OnFailure, OnRequest, OnResponse};
 use tracing::Span;
 
 pub(crate) static GRPC_ENDPOINT_PATH_HEADER: HeaderName = HeaderName::from_static("grpc-path-req");
@@ -79,5 +80,16 @@ impl<B, M: MetricsCallbackProvider> OnRequest<B> for MetricsHandler<M> {
     fn on_request(&mut self, request: &Request<B>, _span: &Span) {
         self.metrics_provider
             .on_request(request.uri().path().to_string());
+    }
+}
+
+impl<M: MetricsCallbackProvider> OnFailure<GrpcFailureClass> for MetricsHandler<M> {
+    fn on_failure(
+        &mut self,
+        _failure_classification: GrpcFailureClass,
+        _latency: Duration,
+        _span: &Span,
+    ) {
+        // just do nothing for now so we avoid printing unnecessary logs
     }
 }

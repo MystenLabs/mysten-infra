@@ -33,7 +33,7 @@ use tower::{
 use tower_http::classify::{GrpcErrorsAsFailures, SharedClassifier};
 use tower_http::propagate_header::PropagateHeaderLayer;
 use tower_http::set_header::SetRequestHeaderLayer;
-use tower_http::trace::{DefaultMakeSpan, TraceLayer};
+use tower_http::trace::{DefaultMakeSpan, DefaultOnBodyChunk, DefaultOnEos, TraceLayer};
 
 pub struct ServerBuilder<M: MetricsCallbackProvider = DefaultMetricsCallbackProvider> {
     router: Router<WrapperService<M>>,
@@ -50,6 +50,9 @@ type WrapperService<M> = Stack<
                 SharedClassifier<GrpcErrorsAsFailures>,
                 DefaultMakeSpan,
                 MetricsHandler<M>,
+                MetricsHandler<M>,
+                DefaultOnBodyChunk,
+                DefaultOnEos,
                 MetricsHandler<M>,
             >,
             Stack<
@@ -90,7 +93,8 @@ impl<M: MetricsCallbackProvider> ServerBuilder<M> {
 
         let request_metrics = TraceLayer::new_for_grpc()
             .on_request(metrics.clone())
-            .on_response(metrics);
+            .on_response(metrics.clone())
+            .on_failure(metrics);
 
         let global_concurrency_limit = config
             .global_concurrency_limit
