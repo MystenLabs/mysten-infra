@@ -528,7 +528,7 @@ async fn open_as_secondary_test() {
         assert_eq!(secondary_db.get(&k).unwrap(), Some(v));
     }
 
-    // Update the value fro 0 to 10
+    // Update the value from 0 to 10
     primary_db.insert(&0, &"10".to_string()).unwrap();
 
     // This should still be stale since secondary is behind
