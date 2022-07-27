@@ -73,10 +73,10 @@ pub trait Certifiable {
 /// let mut rng = rand::thread_rng();
 /// let keypairs: Vec<_> = (0..10).into_iter().map(|_| ed25519_dalek::Keypair::generate(&mut rng)).collect();
 /// let spkis = keypairs.iter().map(|kp| ed25519_certgen::Ed25519::public_key_to_spki(&kp.public)).collect::<Vec<_>>();
-/// let psket PskSet::from_der(&spkis.iter().map(|spki| &spki[..]).collect::<Vec<_>>()[..]).unwrap();
+/// let pskset = PskSet::from_der(&spkis.iter().map(|spki| &spki[..]).collect::<Vec<_>>()[..]).unwrap();
 /// ```
 ///
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct PskSet {
     pub spki_set: BTreeSet<Psk>,
 }

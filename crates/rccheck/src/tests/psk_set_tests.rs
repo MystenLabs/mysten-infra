@@ -1,30 +1,21 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{ed25519_certgen::Ed25519, *};
+use crate::{ed25519_certgen::Ed25519, test_utils::cert_bytes_to_spki_bytes, *};
 use rcgen::generate_simple_self_signed;
 use rustls::{client::ServerCertVerifier, server::ClientCertVerifier};
-use x509_parser::traits::FromDer;
-
-fn cert_bytes_to_spki_bytes(cert_bytes: &[u8]) -> Vec<u8> {
-    let cert_parsed = X509Certificate::from_der(cert_bytes)
-        .map_err(|_| rustls::Error::InvalidCertificateEncoding)
-        .unwrap();
-    let spki = cert_parsed.1.public_key().clone();
-    spki.raw.to_vec()
-}
 
 #[test]
-fn serde_round_trip() {
+fn serde_round_trip_psk_set() {
     let subject_alt_names = vec!["localhost".to_string()];
 
     let cert = generate_simple_self_signed(subject_alt_names).unwrap();
     let cert_bytes: Vec<u8> = cert.serialize_der().unwrap();
 
     let spki = cert_bytes_to_spki_bytes(&cert_bytes);
-    let psk = Psk::from_der(&spki).unwrap();
+    let psk = PskSet::from_der(&[&spki[..]]).unwrap();
     let psk_bytes = bincode::serialize(&psk).unwrap();
-    let psk_roundtripped = bincode::deserialize::<Psk>(&psk_bytes).unwrap();
+    let psk_roundtripped = bincode::deserialize::<PskSet>(&psk_bytes).unwrap();
     assert_eq!(psk, psk_roundtripped);
 }
 
