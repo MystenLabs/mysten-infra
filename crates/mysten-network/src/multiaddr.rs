@@ -8,7 +8,7 @@ use std::{
     net::{IpAddr, SocketAddr},
 };
 
-// Converts a /ip{4,6}/-/tcp/- address to SocketAddr.
+// Converts a /ip{4,6}/-/tcp/-[/-] Multiaddr to SocketAddr.
 pub fn to_socket_addr(addr: &Multiaddr) -> Result<SocketAddr> {
     let mut iter = addr.iter();
     let ip = match iter
