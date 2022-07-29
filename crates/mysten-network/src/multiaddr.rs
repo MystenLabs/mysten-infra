@@ -9,6 +9,7 @@ use std::{
 };
 
 // Converts a /ip{4,6}/-/tcp/-[/-] Multiaddr to SocketAddr.
+// Useful when an external library only accepts SocketAddr, e.g. to start a local server.
 pub fn to_socket_addr(addr: &Multiaddr) -> Result<SocketAddr> {
     let mut iter = addr.iter();
     let ip = match iter
@@ -134,7 +135,7 @@ mod test {
     use multiaddr::multiaddr;
 
     #[test]
-    fn test_to_socket_addr() {
+    fn test_to_socket_addr_basic() {
         let multi_addr_ipv4 = multiaddr!(Ip4([127, 0, 0, 1]), Tcp(10500u16));
         let socket_addr_ipv4 =
             to_socket_addr(&multi_addr_ipv4).expect("Couldn't convert to socket addr");
@@ -144,5 +145,11 @@ mod test {
         let socket_addr_ipv6 =
             to_socket_addr(&multi_addr_ipv6).expect("Couldn't convert to socket addr");
         assert_eq!(socket_addr_ipv6.to_string(), "[ac::1:1:1:1:1]:10500");
+    }
+
+    #[test]
+    fn test_to_socket_addr_unsupported_protocol() {
+        let multi_addr_dns = multiaddr!(Dnsaddr("mysten.sui"), Tcp(10500u16));
+        to_socket_addr(&multi_addr_dns).expect_err("DNS is unsupported");
     }
 }
