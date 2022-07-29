@@ -10,6 +10,7 @@ use std::{
 
 // Converts a /ip{4,6}/-/tcp/-[/-] Multiaddr to SocketAddr.
 // Useful when an external library only accepts SocketAddr, e.g. to start a local server.
+// See `client::endpoint_from_multiaddr()` for converting to Endpoint for clients.
 pub fn to_socket_addr(addr: &Multiaddr) -> Result<SocketAddr> {
     let mut iter = addr.iter();
     let ip = match iter
