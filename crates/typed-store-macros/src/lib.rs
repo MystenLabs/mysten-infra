@@ -106,7 +106,6 @@ fn get_opts(attr: &Attribute) -> syn::Result<(bool, usize)> {
 /// A helper macro to simplify common operations for opening and dumping structs of DBMaps
 /// It operates on a struct where all the members are DBMap<K, V>
 /// `DBMapTableUtil` traits are then derived
-/// `open_tables_read_write` and `open_tables_read_only` are also derived for the top level struct
 /// We can also supply column family options on the default ones
 ///  #[options(optimization = "point_lookup", cache_capacity = "1000000")]
 ///
@@ -138,7 +137,6 @@ fn get_opts(attr: &Attribute) -> syn::Result<(bool, usize)> {
 /// }
 ///
 /// /// All traits in `DBMapTableUtil` are automatically derived
-/// /// `open_tables_read_write` and `open_tables_read_only` are also derived
 /// /// Use the struct like normal
 /// let primary_path = tempfile::tempdir().expect("Failed to open temporary directory").into_path();
 /// /// This is auto derived
@@ -146,6 +144,7 @@ fn get_opts(attr: &Attribute) -> syn::Result<(bool, usize)> {
 ///
 /// /// Do some stuff with the DB
 ///
+/// /// We must open as secondary (read only) before using debug features
 /// /// Open in secondary mode for dumping and other debug features
 /// let tbls_secondary = Tables::open_tables_read_only(primary_path.clone(), None, None);
 /// /// Table dump is auto derived
@@ -225,38 +224,40 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
         use typed_store::Map;
         use rocksdb::MultiThreaded;
         use std::path::Path as FilePath;
+        use pre::pre;
+
         const DB_DEFAULT_CF_NAME: &str = "default";
 
-        impl #name {
-            /// TODO: figure out how to export comments
+        impl DBMapTableUtil for #name {
             /// Opens a set of tables in read-write mode
             /// Only one process is allowed to do this at a time
-            pub fn open_tables_read_write(
+            fn open_tables_read_write(
                 path: PathBuf,
                 db_options: Option<RocksDBOptions>,
             ) -> Self {
-                Self::open_tables(path, None, db_options)
+                Self::open_tables_impl(path, None, db_options)
             }
 
-            /// TODO: figure out how to export comments
             /// Open in read only mode. No limitation on number of processes to do this
-            pub fn open_tables_read_only(
+            fn open_tables_read_only(
                 path: PathBuf,
                 with_secondary_path: Option<PathBuf>,
                 db_options: Option<RocksDBOptions>,
             ) -> Self {
                 match with_secondary_path {
-                    Some(q) => Self::open_tables(path, Some(q), db_options),
+                    Some(q) => Self::open_tables_impl(path, Some(q), db_options),
                     None => {
                         let p: PathBuf = tempfile::tempdir()
                         .expect("Failed to open temporary directory")
                         .into_path();
-                        Self::open_tables(path, Some(p), db_options)
+                        Self::open_tables_impl(path, Some(p), db_options)
                     }
                 }
             }
+
+            /// Opens a set of tables in read-write mode
             /// If with_secondary_path is set, the DB is opened in read only mode with the path specified
-            fn open_tables(
+            fn open_tables_impl(
                 path: PathBuf,
                 with_secondary_path: Option<PathBuf>,
                 db_options: Option<RocksDBOptions>,
@@ -327,11 +328,8 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
                 point_lookup
             }
 
-        }
-
-        impl DBMapTableUtil for #name {
-            /// TODO: figure out how to export comments
             /// List all the tables at this path
+            /// Tables must be opened in read only mode using `open_tables_read_only`
             fn list_tables(path: PathBuf) -> anyhow::Result<Vec<String>> {
                 let opts = RocksDBOptions::default();
                 rocksdb::DBWithThreadMode::<MultiThreaded>::list_cf(&opts, &path)
@@ -349,8 +347,9 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
                         .collect()
                 })
             }
-            /// TODO: figure out how to export comments
+
             /// Dump all key-value pairs in the page at the given table name
+            /// Tables must be opened in read only mode using `open_tables_read_only`
             fn dump(&self, table_name: &str, page_size: u16,
                 page_number: usize) -> anyhow::Result<BTreeMap<String, String>> {
                 Ok(match table_name {
@@ -369,8 +368,9 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
                     _ => anyhow::bail!("No such table name: {}", table_name),
                 })
             }
-            /// TODO: figure out how to export comments
+
             /// Count the keys in this table
+            /// Tables must be opened in read only mode using `open_tables_read_only`
             fn count_keys(&self, table_name: &str) -> anyhow::Result<usize> {
                 Ok(match table_name {
                     #(

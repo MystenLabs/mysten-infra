@@ -21,6 +21,7 @@ tokio = { version = "1.20.0", features = ["sync", "macros", "rt"] }
 tempfile = "3.3.0"
 rocksdb = { version = "0.18.0", features = ["snappy", "lz4", "zstd", "zlib", "multi-threaded-cf"], default-features = false }
 fdlimit = "0.2.1"
+pre = "0.2.0"
 
 [dev-dependencies]
 anyhow = "1.0.52"

@@ -1,3 +1,5 @@
+use pre::pre;
+use rocksdb::Options;
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 use serde::{de::DeserializeOwned, Serialize};
@@ -82,10 +84,32 @@ where
 /// Table needs to be opened to secondary (read only) mode for most features here to work
 /// This trait is needed for #[derive(DBMapUtils)] on structs which have all members as DBMap<K, V>
 pub trait DBMapTableUtil {
+    fn open_tables_read_write(path: PathBuf, db_options: Option<Options>) -> Self;
+
+    fn open_tables_read_only(
+        path: PathBuf,
+        with_secondary_path: Option<PathBuf>,
+        db_options: Option<Options>,
+    ) -> Self;
+
+    fn open_tables_impl(
+        path: PathBuf,
+        with_secondary_path: Option<PathBuf>,
+        db_options: Option<Options>,
+    ) -> Self;
+
+    fn adjusted_db_options(
+        db_options: Option<Options>,
+        cache_capacity: usize,
+        point_lookup: bool,
+    ) -> Options;
+
     /// Lists all the tables in a DBMap group
+    #[pre("Must be called only after `open_tables_read_only`")]
     fn list_tables(path: PathBuf) -> anyhow::Result<Vec<String>>;
 
     /// Dumps all the entries in the page of the table
+    #[pre("Must be called only after `open_tables_read_only`")]
     fn dump(
         &self,
         table_name: &str,
@@ -94,5 +118,6 @@ pub trait DBMapTableUtil {
     ) -> anyhow::Result<BTreeMap<String, String>>;
 
     /// Counts the keys in the table
+    #[pre("Must be called only after `open_tables_read_only`")]
     fn count_keys(&self, table_name: &str) -> anyhow::Result<usize>;
 }

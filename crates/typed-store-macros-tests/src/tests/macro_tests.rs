@@ -24,6 +24,7 @@ struct Tables {
     table4: DBMap<i32, String>,
 }
 
+#[pre]
 #[tokio::test]
 async fn macro_test() {
     let primary_path = temp_dir();
