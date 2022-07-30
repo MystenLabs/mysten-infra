@@ -5,12 +5,15 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::Type::{self};
 use syn::{parse_macro_input, Attribute, ItemStruct, Lit, Meta, NestedMeta, PathArguments};
+
 const DEFAULT_CACHE_CAPACITY: usize = 300_000;
 const DB_OPTIONS_ATTR_NAME: &str = "options";
 const DB_OPTIONS_OPTIMIZATION_ATTR_NAME: &str = "optimization";
 const DB_OPTIONS_CACHE_CAPACITY_ATTR_NAME: &str = "cache_capacity";
 const DB_OPTIONS_POINT_LOOKUP_ATTR_NAME: &str = "point_lookup";
 
+/// Extracts the options from attribute
+/// Valid options are `optimization = "point_lookup"` and `cache_capacity = <usize>
 fn get_opts(attr: &Attribute) -> syn::Result<(bool, usize)> {
     let meta = attr.parse_meta()?;
 
@@ -100,18 +103,77 @@ fn get_opts(attr: &Attribute) -> syn::Result<(bool, usize)> {
     ))
 }
 
-// #[options(optimization = "point_lookup", cache_capacity = "1000000")]
-
+/// A helper macro to simplify common operations for opening and dumping structs of DBMaps
+/// It operates on a struct where all the members are DBMap<K, V>
+/// `DBMapTableUtil` traits are then derived
+/// `open_tables_read_write` and `open_tables_read_only` are also derived for the top level struct
+/// We can also supply column family options on the default ones
+///  #[options(optimization = "point_lookup", cache_capacity = "1000000")]
+///
+/// The typical flow for creating tables is to define a struct of DBMap tables, create the column families, then reopen
+/// If dumping is needed, there's an additional step of implementing a way to match and dump each table
+///
+/// We remove the need for all these steps by auto deriving the member functions.
+///
+/// # Examples
+///
+/// Well formed struct of tables
+/// ```
+/// use typed_store::rocks::DBMap;
+/// use typed_store_macros::DBMapUtils;
+/// use typed_store::traits::DBMapTableUtil;
+///
+/// /// Define a struct with all members having type DBMap<K, V>
+/// #[derive(DBMapUtils)]
+/// struct Tables {
+///     /// Specify some or no options for each field
+///     /// Valid options are currently `optimization = "point_lookup"` and `cache_capacity = <Uint>`
+///     #[options(optimization = "point_lookup", cache_capacity = 100000)]
+///     table1: DBMap<String, String>,
+///     #[options(optimization = "point_lookup")]
+///     table2: DBMap<i32, String>,
+///     table3: DBMap<i32, String>,
+///     #[options()]
+///     table4: DBMap<i32, String>,
+/// }
+///
+/// /// All traits in `DBMapTableUtil` are automatically derived
+/// /// `open_tables_read_write` and `open_tables_read_only` are also derived
+/// /// Use the struct like normal
+/// let primary_path = tempfile::tempdir().expect("Failed to open temporary directory").into_path();
+/// /// This is auto derived
+/// let tbls_primary = Tables::open_tables_read_write(primary_path.clone(), None);
+///
+/// /// Do some stuff with the DB
+///
+/// /// Open in secondary mode for dumping and other debug features
+/// let tbls_secondary = Tables::open_tables_read_only(primary_path.clone(), None, None);
+/// /// Table dump is auto derived
+/// let entries = tbls_secondary.dump("table1", 100, 0).unwrap();
+/// /// Key counting fn is auto derived
+/// let key_count = tbls_secondary.count_keys("table1").unwrap();
+/// /// Listing all tables is auto derived
+/// let table_names = Tables::list_tables(primary_path).unwrap();
+///
+/// // Bad usage example
+/// // Structs fields most only be of type DBMap<K, V>
+/// // This will fail to compile with error `All struct members must be of type DMBap<K, V>`
+/// // #[derive(DBMapUtils)]
+/// // struct BadTables {
+/// //     table1: DBMap<String, String>,
+/// //     bad_field: u32,
+/// // #}
+/// ```
 #[proc_macro_derive(DBMapUtils, attributes(options))]
-pub fn derive_db(input: TokenStream) -> TokenStream {
+pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let name = &input.ident;
 
     // Check that the type is DBMap
     let info = input.fields.iter().map(|f| {
-        if f.attrs.len() > 1 {
-            panic!("Too many attributes. Only `{DB_OPTIONS_ATTR_NAME}` allowed");
-        }
+        // if f.attrs.len() > 1 {
+        //     panic!("Too many attributes. Only `{DB_OPTIONS_ATTR_NAME}` allowed");
+        // }
         let attrs: Vec<_> = f
             .attrs
             .iter()
@@ -163,7 +225,12 @@ pub fn derive_db(input: TokenStream) -> TokenStream {
         use typed_store::Map;
         use rocksdb::MultiThreaded;
         use std::path::Path as FilePath;
+        const DB_DEFAULT_CF_NAME: &str = "default";
+
         impl #name {
+            /// TODO: figure out how to export comments
+            /// Opens a set of tables in read-write mode
+            /// Only one process is allowed to do this at a time
             pub fn open_tables_read_write(
                 path: PathBuf,
                 db_options: Option<RocksDBOptions>,
@@ -171,6 +238,8 @@ pub fn derive_db(input: TokenStream) -> TokenStream {
                 Self::open_tables(path, None, db_options)
             }
 
+            /// TODO: figure out how to export comments
+            /// Open in read only mode. No limitation on number of processes to do this
             pub fn open_tables_read_only(
                 path: PathBuf,
                 with_secondary_path: Option<PathBuf>,
@@ -261,6 +330,8 @@ pub fn derive_db(input: TokenStream) -> TokenStream {
         }
 
         impl DBMapTableUtil for #name {
+            /// TODO: figure out how to export comments
+            /// List all the tables at this path
             fn list_tables(path: PathBuf) -> anyhow::Result<Vec<String>> {
                 let opts = RocksDBOptions::default();
                 rocksdb::DBWithThreadMode::<MultiThreaded>::list_cf(&opts, &path)
@@ -269,7 +340,7 @@ pub fn derive_db(input: TokenStream) -> TokenStream {
                     q.iter()
                         .filter_map(|s| {
                             // The `default` table is not used
-                            if s != "default" {
+                            if s != DB_DEFAULT_CF_NAME {
                                 Some(s.clone())
                             } else {
                                 None
@@ -278,7 +349,8 @@ pub fn derive_db(input: TokenStream) -> TokenStream {
                         .collect()
                 })
             }
-
+            /// TODO: figure out how to export comments
+            /// Dump all key-value pairs in the page at the given table name
             fn dump(&self, table_name: &str, page_size: u16,
                 page_number: usize) -> anyhow::Result<BTreeMap<String, String>> {
                 Ok(match table_name {
@@ -297,7 +369,8 @@ pub fn derive_db(input: TokenStream) -> TokenStream {
                     _ => anyhow::bail!("No such table name: {}", table_name),
                 })
             }
-
+            /// TODO: figure out how to export comments
+            /// Count the keys in this table
             fn count_keys(&self, table_name: &str) -> anyhow::Result<usize> {
                 Ok(match table_name {
                     #(

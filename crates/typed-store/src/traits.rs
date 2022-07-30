@@ -1,7 +1,7 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 use serde::{de::DeserializeOwned, Serialize};
-use std::{borrow::Borrow, error::Error};
+use std::{borrow::Borrow, collections::BTreeMap, error::Error, path::PathBuf};
 
 pub trait Map<'a, K, V>
 where
@@ -76,4 +76,23 @@ where
 
     /// Try to catch up with primary when running as secondary
     fn try_catch_up_with_primary(&self) -> Result<(), Self::Error>;
+}
+
+/// Traits for DBMap table groups
+/// Table needs to be opened to secondary (read only) mode for most features here to work
+/// This trait is needed for #[derive(DBMapUtils)] on structs which have all members as DBMap<K, V>
+pub trait DBMapTableUtil {
+    /// Lists all the tables in a DBMap group
+    fn list_tables(path: PathBuf) -> anyhow::Result<Vec<String>>;
+
+    /// Dumps all the entries in the page of the table
+    fn dump(
+        &self,
+        table_name: &str,
+        page_size: u16,
+        page_number: usize,
+    ) -> anyhow::Result<BTreeMap<String, String>>;
+
+    /// Counts the keys in the table
+    fn count_keys(&self, table_name: &str) -> anyhow::Result<usize>;
 }

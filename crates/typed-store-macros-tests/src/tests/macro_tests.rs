@@ -1,8 +1,10 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashSet;
+
 use typed_store::rocks::DBMap;
-use typed_store::rocks::DBMapTableUtil;
+use typed_store::traits::DBMapTableUtil;
 use typed_store_macros::DBMapUtils;
 
 fn temp_dir() -> std::path::PathBuf {
@@ -10,13 +12,15 @@ fn temp_dir() -> std::path::PathBuf {
         .expect("Failed to open temporary directory")
         .into_path()
 }
-
+/// This struct is used to illustrate how the utility works
 #[derive(DBMapUtils)]
 struct Tables {
     #[options(optimization = "point_lookup", cache_capacity = 100000)]
     table1: DBMap<String, String>,
+    #[options(optimization = "point_lookup")]
     table2: DBMap<i32, String>,
     table3: DBMap<i32, String>,
+    #[options()]
     table4: DBMap<i32, String>,
 }
 
@@ -39,8 +43,18 @@ async fn macro_test() {
         .expect("Failed to multi-insert");
 
     // Open in secondary mode
-    let tbls_secondary = Tables::open_tables_read_only(primary_path, None, None);
+    let tbls_secondary = Tables::open_tables_read_only(primary_path.clone(), None, None);
 
+    // Check all the tables can be listed
+    let table_names = Tables::list_tables(primary_path).unwrap();
+    let exp: HashSet<String> = HashSet::from_iter(
+        vec!["table1", "table2", "table3", "table4"]
+            .into_iter()
+            .map(|s| s.to_owned()),
+    );
+    assert_eq!(HashSet::from_iter(table_names), exp);
+
+    // Check the counts
     assert_eq!(9, tbls_secondary.count_keys("table1").unwrap());
     assert_eq!(7, tbls_secondary.count_keys("table2").unwrap());
 
