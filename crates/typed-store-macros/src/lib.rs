@@ -214,6 +214,9 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
     let (inner_types, optimizations): (Vec<_>, Vec<_>) = inner_types_with_opts.into_iter().unzip();
     let (point_lookup, cache_capacity): (Vec<_>, Vec<_>) = optimizations.into_iter().unzip();
 
+    let precondition_str = "#[pre(\"Must be called only after `open_tables_read_only`\")]";
+    let _precondition_str_tok: proc_macro2::TokenStream = precondition_str.parse().unwrap();
+
     TokenStream::from(quote! {
         use std::path::PathBuf;
         use rocksdb::Options as RocksDBOptions;
@@ -330,6 +333,8 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
 
             /// List all the tables at this path
             /// Tables must be opened in read only mode using `open_tables_read_only`
+            /// TODO: use preconditions to ensure call after `open_tables_read_only`
+            // #_precondition_str_tok
             fn list_tables(path: PathBuf) -> anyhow::Result<Vec<String>> {
                 let opts = RocksDBOptions::default();
                 rocksdb::DBWithThreadMode::<MultiThreaded>::list_cf(&opts, &path)
@@ -350,6 +355,8 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
 
             /// Dump all key-value pairs in the page at the given table name
             /// Tables must be opened in read only mode using `open_tables_read_only`
+            /// TODO: use preconditions to ensure call after `open_tables_read_only`
+            // #_precondition_str_tok
             fn dump(&self, table_name: &str, page_size: u16,
                 page_number: usize) -> anyhow::Result<BTreeMap<String, String>> {
                 Ok(match table_name {
@@ -371,6 +378,8 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
 
             /// Count the keys in this table
             /// Tables must be opened in read only mode using `open_tables_read_only`
+            /// TODO: use preconditions to ensure call after `open_tables_read_only`
+            // #_precondition_str_tok
             fn count_keys(&self, table_name: &str) -> anyhow::Result<usize> {
                 Ok(match table_name {
                     #(
