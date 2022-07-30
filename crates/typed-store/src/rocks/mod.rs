@@ -10,7 +10,13 @@ use bincode::Options;
 use collectable::TryExtend;
 use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, WriteBatch};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{borrow::Borrow, marker::PhantomData, path::Path, sync::Arc};
+use std::{
+    borrow::Borrow,
+    collections::BTreeMap,
+    marker::PhantomData,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tracing::instrument;
 
 use self::{iter::Iter, keys::Keys, values::Values};
@@ -545,4 +551,18 @@ where
         .with_fixint_encoding()
         .serialize(t)
         .map_err(|e| e.into())
+}
+
+/// Utils for DBMap
+/// Use #[derive(DBMapUtils)] on structs with DBMap
+/// Tutorial TODO
+pub trait DBMapTableUtil {
+    fn list_tables(path: PathBuf) -> anyhow::Result<Vec<String>>;
+    fn dump(
+        &self,
+        table_name: &str,
+        page_size: u16,
+        page_number: usize,
+    ) -> anyhow::Result<BTreeMap<String, String>>;
+    fn count_keys(&self, table_name: &str) -> anyhow::Result<usize>;
 }
