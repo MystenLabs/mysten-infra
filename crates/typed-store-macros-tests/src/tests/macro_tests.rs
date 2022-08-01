@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 use typed_store::rocks::DBMap;
 use typed_store::traits::DBMapTableUtil;
+use typed_store::traits::Map;
 use typed_store_macros::DBMapUtils;
 
 fn temp_dir() -> std::path::PathBuf {
@@ -24,7 +25,18 @@ struct Tables {
     table4: DBMap<i32, String>,
 }
 
-#[pre]
+/// The existence of this struct is to prove that multiple structs can be defined in same file with no issues
+#[derive(DBMapUtils)]
+struct Tables2 {
+    #[options(optimization = "point_lookup", cache_capacity = 100000)]
+    table1: DBMap<String, String>,
+    #[options(optimization = "point_lookup")]
+    table2: DBMap<i32, String>,
+    table3: DBMap<i32, String>,
+    #[options()]
+    table4: DBMap<i32, String>,
+}
+
 #[tokio::test]
 async fn macro_test() {
     let primary_path = temp_dir();
