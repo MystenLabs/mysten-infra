@@ -240,7 +240,7 @@ fn extract_struct_info(
             .filter(|a| a.path.is_ident(DB_OPTIONS_ATTR_NAME))
             .collect();
 
-        let options = if f.attrs.is_empty() {
+        let options = if attrs.is_empty() {
             TableOptions::default()
         } else {
             get_options(attrs.get(0).unwrap()).unwrap()

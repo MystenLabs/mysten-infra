@@ -18,10 +18,12 @@ fn temp_dir() -> std::path::PathBuf {
 /// This struct is used to illustrate how the utility works
 #[derive(DBMapUtils)]
 struct Tables {
+    /// A comment
     #[options(optimization = "point_lookup", cache_capacity = 100000)]
     table1: DBMap<String, String>,
     #[options(optimization = "point_lookup")]
     table2: DBMap<i32, String>,
+    /// A comment
     table3: DBMap<i32, String>,
     #[options()]
     table4: DBMap<i32, String>,
