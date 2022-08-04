@@ -16,6 +16,9 @@ use tracing::instrument;
 use self::{iter::Iter, keys::Keys, values::Values};
 pub use errors::TypedStoreError;
 
+// The default bytes limit on total memtable size per RocksDB.
+const DB_WRITE_BUFFER_SIZE: usize = 512 * 1024 * 1024;
+
 #[cfg(test)]
 mod tests;
 
@@ -430,8 +433,8 @@ where
 /// Creates a default Rocksdb option.
 pub fn default_rocksdb_options() -> rocksdb::Options {
     let mut opt = rocksdb::Options::default();
-    // Limit the total memtable memory usage per db.
-    opt.set_db_write_buffer_size(512 * 1024 * 1024);
+    // Limit the total memtable usage per db.
+    opt.set_db_write_buffer_size(DB_WRITE_BUFFER_SIZE);
     opt
 }
 
