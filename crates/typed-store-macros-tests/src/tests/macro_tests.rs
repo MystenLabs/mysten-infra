@@ -155,10 +155,7 @@ struct TablesCustomOptionsFn {
 
 /// This custom option specifies
 fn custom_options() -> Options {
-    println!("Here!");
     let mut opt = Options::default();
-
     opt.set_max_open_files(1234);
-
     opt
 }
