@@ -1,6 +1,7 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use rocksdb::Options;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -69,7 +70,7 @@ struct TablesSingle {
 }
 
 #[tokio::test]
-async fn macro_test() {
+async fn basic_macro_test() {
     let primary_path = temp_dir();
     let tbls_primary = Tables::open_tables_read_write(primary_path.clone(), None);
 
@@ -132,4 +133,32 @@ async fn macro_test() {
     assert_eq!(3, m.len());
     assert_eq!(format!("\"7\""), *m.get(&"\"7\"".to_string()).unwrap());
     assert_eq!(format!("\"8\""), *m.get(&"\"8\"".to_string()).unwrap());
+}
+
+/// This struct is used to illustrate how the utility works
+#[derive(DBMapUtils)]
+struct TablesCustomOptionsFn {
+    /// A comment
+    #[options(
+        optimization = "point_lookup",
+        cache_capacity = 100000,
+        custom = "custom_options"
+    )]
+    pub table1: DBMap<String, String>,
+    #[options(optimization = "point_lookup")]
+    pub table2: DBMap<i32, String>,
+    /// A comment
+    pub table3: DBMap<i32, String>,
+    #[options()]
+    pub table4: DBMap<i32, String>,
+}
+
+/// This custom option specifies
+fn custom_options() -> Options {
+    println!("Here!");
+    let mut opt = Options::default();
+
+    opt.set_max_open_files(1234);
+
+    opt
 }
