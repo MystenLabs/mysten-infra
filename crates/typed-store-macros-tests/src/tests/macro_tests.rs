@@ -1,6 +1,7 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use rocksdb::Options;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -71,7 +72,7 @@ struct TablesSingle {
 #[tokio::test]
 async fn macro_test() {
     let primary_path = temp_dir();
-    let tbls_primary = Tables::open_tables_read_write(primary_path.clone(), None);
+    let tbls_primary = Tables::open_tables_read_write(primary_path.clone(), None, None);
 
     // Write to both tables
     let keys_vals_1 = (1..10).map(|i| (i.to_string(), i.to_string()));
@@ -132,4 +133,24 @@ async fn macro_test() {
     assert_eq!(3, m.len());
     assert_eq!(format!("\"7\""), *m.get(&"\"7\"".to_string()).unwrap());
     assert_eq!(format!("\"8\""), *m.get(&"\"8\"".to_string()).unwrap());
+}
+
+#[tokio::test]
+async fn macro_test_configure() {
+    let primary_path = temp_dir();
+
+    // Get a configurator for this table
+    let mut config = Tables::configurator();
+    // Config table 1
+    config.table1 = Options::default();
+    config.table1.create_if_missing(true);
+    config.table1.set_write_buffer_size(123456);
+
+    // Config table 2
+    config.table2 = config.table1.clone();
+
+    config.table2.create_if_missing(false);
+
+    // Build and open with new config
+    let _ = Tables::open_tables_read_write(primary_path, None, Some(config.build()));
 }
