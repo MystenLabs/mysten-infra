@@ -461,9 +461,14 @@ pub fn default_rocksdb_options() -> rocksdb::Options {
     let mut opt = rocksdb::Options::default();
     // Sui uses multiple RocksDB in a node, so total sizes of write buffers and WAL can be higher
     // than the limits below.
+    //
     // RocksDB also exposes the option to configure total write buffer size across multiple instances
     // via `write_buffer_manager`. But the write buffer flush policy (flushing the buffer receiving
     // the next write) may not work well. So sticking to per-db write buffer size limit for now.
+    //
+    // The environment variables are only meant to be emergency overrides. They may go away in future.
+    // If you need to modify an option, either update the default value, or override the option in
+    // Sui / Narwhal.
     opt.set_db_write_buffer_size(
         read_size_from_env(ENV_VAR_DB_WRITE_BUFFER_SIZE).unwrap_or(DEFAULT_DB_WRITE_BUFFER_SIZE)
             * 1024
