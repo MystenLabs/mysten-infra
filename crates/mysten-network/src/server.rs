@@ -4,6 +4,8 @@ use crate::metrics::{
     DefaultMetricsCallbackProvider, MetricsCallbackProvider, MetricsHandler,
     GRPC_ENDPOINT_PATH_HEADER,
 };
+use hyper::body::HttpBody;
+use tower_layer::Layer;
 use crate::{
     config::Config,
     multiaddr::{parse_dns, parse_ip4, parse_ip6},
@@ -27,7 +29,7 @@ use tower::{
     layer::util::{Identity, Stack},
     limit::GlobalConcurrencyLimitLayer,
     load_shed::LoadShedLayer,
-    util::Either,
+    util::{Either, UnsyncBoxService},
     Service, ServiceBuilder,
 };
 use tower_http::classify::{GrpcErrorsAsFailures, SharedClassifier};
@@ -43,6 +45,7 @@ pub struct ServerBuilder<M: MetricsCallbackProvider = DefaultMetricsCallbackProv
 type AddPathToHeaderFunction = fn(&Request<Body>) -> Option<HeaderValue>;
 
 type WrapperService<M> = Stack<
+    Stack<MyMiddlewareLayer,
     Stack<
         PropagateHeaderLayer,
         Stack<
@@ -63,7 +66,7 @@ type WrapperService<M> = Stack<
                 >,
             >,
         >,
-    >,
+    >>,
     Identity,
 >;
 
@@ -113,6 +116,7 @@ impl<M: MetricsCallbackProvider> ServerBuilder<M> {
             ))
             .layer(request_metrics)
             .layer(PropagateHeaderLayer::new(GRPC_ENDPOINT_PATH_HEADER.clone()))
+            .layer(MyMiddlewareLayer::default())
             .into_inner();
 
         let (health_reporter, health_service) = tonic_health::server::health_reporter();
@@ -149,6 +153,21 @@ impl<M: MetricsCallbackProvider> ServerBuilder<M> {
         self.router = self.router.add_service(svc);
         self
     }
+
+    // /// Add a new layer to this Server.
+    // /// pub fn layer<NewLayer>(self, new_layer: NewLayer) -> Server<Stack<NewLayer, L>> {
+    // pub fn add_layer<NewLayer>(mut self, new_layer: NewLayer) -> Self
+    // where
+    //     S: Service<Request<Body>, Response = Response<BoxBody>, Error = Infallible>
+    //         + NamedService
+    //         + Clone
+    //         + Send
+    //         + 'static,
+    //     S::Future: Send + 'static,
+    // {
+    //     self.router = self.router.layer(svc);
+    //     self
+    // }
 
     pub async fn bind(self, addr: &Multiaddr) -> Result<Server> {
         let mut iter = addr.iter();
@@ -209,6 +228,68 @@ impl<M: MetricsCallbackProvider> ServerBuilder<M> {
             cancel_handle: Some(tx_cancellation),
             local_addr,
             health_reporter: self.health_reporter,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct MyMiddlewareLayer;
+
+impl<S> Layer<S> for MyMiddlewareLayer {
+    type Service = MyMiddleware<S>;
+
+    fn layer(&self, service: S) -> Self::Service {
+        MyMiddleware { inner: service }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MyMiddleware<S> {
+    inner: S,
+}
+
+
+impl<S> Service<hyper::Request<hyper::Body>> for MyMiddleware<S>
+where
+    S: Service<hyper::Request<hyper::Body>, Response = hyper::Response<BoxBody>>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: hyper::Request<hyper::Body>) -> Self::Future {
+        use hyper::body;
+        use hyper::{Body, Response};
+
+        // This is necessary because tonic internally uses `tower::buffer::Buffer`.
+        // See https://github.com/tower-rs/tower/issues/547#issuecomment-767629149
+        // for details on why this is necessary
+        let clone = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, clone);
+
+        println!("@@@@@@@@@ req: {:?}", req);
+        Box::pin(async move {
+            let response = inner.call(req).await?;
+
+            let (headers, body) = response.into_parts();
+            let response = Response::builder().body(body).unwrap();
+            let bytes = body::to_bytes(body).await.unwrap();
+            println!("@@@@@@@@@ response bytes: {:?}", bytes);
+            println!("@@@@@@@@@ response bytes len: {:?}", bytes.len());
+            let body = http_body::combinators::UnsyncBoxBody::new(bytes);
+            let response = Response::from_parts(headers, body);
+            Ok(response)
         })
     }
 }
