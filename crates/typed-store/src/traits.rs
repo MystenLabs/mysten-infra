@@ -179,8 +179,7 @@ pub trait DBMapTableUtil {
 
 #[derive(Clone)]
 pub struct DBMapTableConfigurator(BTreeMap<String, Options>);
-impl DBMapTableConfigurator{
-
+impl DBMapTableConfigurator {
     pub fn new(map: BTreeMap<String, Options>) -> Self {
         Self(map)
     }
