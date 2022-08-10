@@ -86,7 +86,11 @@ where
 /// Table needs to be opened to secondary (read only) mode for most features here to work
 /// This trait is needed for #[derive(DBMapUtils)] on structs which have all members as DBMap<K, V>
 pub trait DBMapTableUtil {
-    fn open_tables_read_write(path: PathBuf, db_options: Option<Options>) -> Self;
+    fn open_tables_read_write(
+        path: PathBuf,
+        db_options: Option<Options>,
+        tables_db_options: Option<DBMapTableConfigurator>,
+    ) -> Self;
 
     fn open_tables_read_only(
         path: PathBuf,
@@ -98,6 +102,7 @@ pub trait DBMapTableUtil {
         path: PathBuf,
         with_secondary_path: Option<PathBuf>,
         db_options: Option<Options>,
+        tables_db_options: Option<DBMapTableConfigurator>,
     ) -> Self;
 
     /// Dumps all the entries in the page of the table
@@ -169,5 +174,18 @@ pub trait DBMapTableUtil {
         point_lookup.set_memtable_whole_key_filtering(true);
 
         point_lookup
+    }
+}
+
+#[derive(Clone)]
+pub struct DBMapTableConfigurator(BTreeMap<String, Options>);
+impl DBMapTableConfigurator{
+
+    pub fn new(map: BTreeMap<String, Options>) -> Self {
+        Self(map)
+    }
+
+    pub fn to_map(&self) -> BTreeMap<String, Options> {
+        self.0.clone()
     }
 }
