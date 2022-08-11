@@ -12,6 +12,9 @@ use syn::{
 
 const DEFAULT_CACHE_CAPACITY: usize = 300_000;
 const DB_OPTIONS_ATTR_NAME: &str = "options";
+const DEFAULT_DB_OPTIONS_CUSTOM_FN: &str = "typed_store::rocks::default_rocksdb_options";
+// Custom function which returns the option
+const DB_OPTIONS_CUSTOM_FUNCTION: &str = "custom";
 const DB_OPTIONS_OPTIMIZATION_ATTR_NAME: &str = "optimization";
 const DB_OPTIONS_CACHE_CAPACITY_ATTR_NAME: &str = "cache_capacity";
 const DB_OPTIONS_POINT_LOOKUP_ATTR_NAME: &str = "point_lookup";
@@ -20,6 +23,7 @@ const DB_OPTIONS_POINT_LOOKUP_ATTR_NAME: &str = "point_lookup";
 struct TableOptions {
     pub point_lookup: bool,
     pub cache_capacity: usize,
+    pub custom_options_fn_name: String,
 }
 
 impl Default for TableOptions {
@@ -27,6 +31,7 @@ impl Default for TableOptions {
         TableOptions {
             point_lookup: false,
             cache_capacity: DEFAULT_CACHE_CAPACITY,
+            custom_options_fn_name: DEFAULT_DB_OPTIONS_CUSTOM_FN.to_owned(),
         }
     }
 }
@@ -100,9 +105,17 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
 
     let (field_names, _field_types, inner_types, derived_table_options) =
         extract_struct_info(input.clone());
-    let (cache_capacity, point_lookup): (Vec<_>, Vec<_>) = derived_table_options
+    let (cache_capacity, (point_lookup, custom_options_fn_name)): (
+        Vec<_>,
+        (Vec<_>, Vec<proc_macro2::TokenStream>),
+    ) = derived_table_options
         .iter()
-        .map(|q| (q.cache_capacity, q.point_lookup))
+        .map(|q| {
+            (
+                q.cache_capacity,
+                (q.point_lookup, q.custom_options_fn_name.parse().unwrap()),
+            )
+        })
         .unzip();
 
     let precondition_str = "#[pre(\"Must be called only after `open_tables_read_only`\")]";
@@ -154,7 +167,7 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
                 let db = {
                     let opt_cfs: &[(&str, &rocksdb::Options)] = &[
                         #(
-                            (stringify!(#field_names), &Self::adjusted_db_options(None, #cache_capacity, #point_lookup).clone()),
+                            (stringify!(#field_names), &Self::adjusted_db_options(Some(#custom_options_fn_name()), #cache_capacity, #point_lookup).clone()),
                         )*
                     ];
 
@@ -291,23 +304,19 @@ fn get_options(attr: &Attribute) -> syn::Result<TableOptions> {
     };
 
     let tokens = match meta_list.nested.len() {
-        0 => {
-            return Ok(TableOptions {
-                point_lookup: false,
-                cache_capacity: DEFAULT_CACHE_CAPACITY,
-            })
-        }
-        1 | 2 => &meta_list.nested,
+        0 => return Ok(TableOptions::default()),
+        1 | 2 | 3 => &meta_list.nested,
         _ => {
             return Err(syn::Error::new_spanned(
                 meta_list.nested,
-                format!("At most 2 attributes allowed: `{DB_OPTIONS_OPTIMIZATION_ATTR_NAME}` and/or `{DB_OPTIONS_CACHE_CAPACITY_ATTR_NAME}`"),
+                format!("At most 3 attributes allowed: `{DB_OPTIONS_OPTIMIZATION_ATTR_NAME}` and/or `{DB_OPTIONS_CACHE_CAPACITY_ATTR_NAME}`"),
             ));
         }
     };
 
     let mut point_lookup = None;
     let mut cache_capacity: Option<usize> = None;
+    let mut custom_options_fn_name: Option<String> = None;
 
     for t in tokens {
         let name_val = match t {
@@ -357,6 +366,26 @@ fn get_options(attr: &Attribute) -> syn::Result<TableOptions> {
                 ));
             }
             point_lookup = Some(true);
+        } else if name_val.path.is_ident(DB_OPTIONS_CUSTOM_FUNCTION) {
+            if custom_options_fn_name.is_some() {
+                return Err(syn::Error::new_spanned(
+                    name_val,
+                    format!("Duplicate entry for `{DB_OPTIONS_CUSTOM_FUNCTION}`"),
+                ));
+            }
+            let opt = match &name_val.lit {
+                Lit::Str(s) => s.value(),
+                _ => {
+                    return Err(syn::Error::new_spanned(
+                        t,
+                        format!(
+                            "Expected function name as string for `{DB_OPTIONS_CUSTOM_FUNCTION}. Function should be of signature Fn()->Options`"
+                        ),
+                    ))
+                }
+            };
+
+            custom_options_fn_name = Some(opt);
         } else {
             return Err(syn::Error::new_spanned(
                 t,
@@ -368,6 +397,8 @@ fn get_options(attr: &Attribute) -> syn::Result<TableOptions> {
     Ok(TableOptions {
         point_lookup: point_lookup.is_some(),
         cache_capacity: cache_capacity.unwrap_or(DEFAULT_CACHE_CAPACITY),
+        custom_options_fn_name: custom_options_fn_name
+            .unwrap_or_else(|| DEFAULT_DB_OPTIONS_CUSTOM_FN.to_owned()),
     })
 }
 
