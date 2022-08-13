@@ -93,6 +93,9 @@ impl<M: MetricsCallbackProvider> ServerBuilder<M> {
         let request_metrics = TraceLayer::new_for_grpc()
             .on_request(metrics.clone())
             .on_response(metrics.clone())
+            .on_body_chunk(|chunk: &Bytes, latency: Duration, _span:&Span| {
+                tracing::debug!("GRPC sending {} bytes over the network", chunk.len())
+            })
             .on_failure(metrics);
 
         let global_concurrency_limit = config
