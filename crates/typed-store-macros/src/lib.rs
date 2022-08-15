@@ -33,13 +33,13 @@ impl Default for GeneralTableOptions {
 /// A user defined function of signature () -> Options can be provided for each table
 /// If a an override function is not specified, the default in `typed_store::rocks::default_rocksdb_options` is used
 /// Example
-/// ```
+/// ```rust,ignore
 /// fn custom_fn_name() -> Options {
 ///     Options::default()
 /// }
 /// ```
 /// can be used on a table by applying the attr:
-/// ```
+/// ``` rust,ignore
 /// #[defuault_options_override_fn = "custom_fn_name"]
 ///```
 ///
@@ -52,11 +52,19 @@ impl Default for GeneralTableOptions {
 ///
 /// Well formed struct of tables
 /// ```
+/// use rocksdb::Options;
 /// use typed_store::rocks::DBMap;
 /// use typed_store_macros::DBMapUtils;
 /// use typed_store::traits::DBMapTableUtil;
 ///
 /// /// Define a struct with all members having type DBMap<K, V>
+///
+/// fn custom_fn_name1() -> Options {Options::default()}
+/// fn custom_fn_name2() -> Options {
+///     let mut op = custom_fn_name1();
+///     op.set_write_buffer_size(123456);
+///     op
+/// }
 /// #[derive(DBMapUtils)]
 /// struct Tables {
 ///     /// Specify some or no options for each field
