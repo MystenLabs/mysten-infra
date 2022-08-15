@@ -31,7 +31,7 @@ impl Default for GeneralTableOptions {
 /// `DBMapTableUtil` traits are then derived
 /// We can also supply column family options on the default ones
 /// A user defined function of signature () -> Options can be provided for each table
-///
+/// If a an override function is not specified, the default in `typed_store::rocks::default_rocksdb_options` is used
 /// Example
 /// ```
 /// fn custom_fn_name() -> Options {
