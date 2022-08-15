@@ -1,11 +1,13 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use lazy_static::lazy_static; // 1.4.0
 use rocksdb::Options;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fmt::Debug;
+use std::sync::Mutex;
 use typed_store::rocks::DBMap;
 use typed_store::traits::DBMapTableUtil;
 use typed_store::traits::Map;
@@ -19,32 +21,15 @@ fn temp_dir() -> std::path::PathBuf {
 /// This struct is used to illustrate how the utility works
 #[derive(DBMapUtils)]
 struct Tables {
-    /// A comment
-    #[options(optimization = "point_lookup", cache_capacity = 100000)]
     table1: DBMap<String, String>,
-    #[options(optimization = "point_lookup")]
-    table2: DBMap<i32, String>,
-    /// A comment
-    table3: DBMap<i32, String>,
-    #[options()]
-    table4: DBMap<i32, String>,
-}
-
-/// The existence of this struct is to prove that multiple structs can be defined in same file with no issues
-#[derive(DBMapUtils)]
-struct Tables2 {
-    #[options(optimization = "point_lookup", cache_capacity = 100000)]
-    table1: DBMap<String, String>,
-    #[options(optimization = "point_lookup")]
     table2: DBMap<i32, String>,
     table3: DBMap<i32, String>,
-    #[options()]
     table4: DBMap<i32, String>,
 }
 
 // Check that generics work
 #[derive(DBMapUtils)]
-struct Tables3<Q, W> {
+struct TablesGenerics<Q, W> {
     table1: DBMap<String, String>,
     table2: DBMap<u32, Generic<Q, W>>,
 }
@@ -65,7 +50,6 @@ impl<
 /// This struct shows that single elem structs work
 #[derive(DBMapUtils)]
 struct TablesSingle {
-    #[options(optimization = "point_lookup", cache_capacity = 100000)]
     table1: DBMap<String, String>,
 }
 
@@ -135,6 +119,38 @@ async fn macro_test() {
     assert_eq!(format!("\"8\""), *m.get(&"\"8\"".to_string()).unwrap());
 }
 
+/// We show that custom functions can be applied
+#[derive(DBMapUtils)]
+struct TablesCustomOptions {
+    #[defuault_options_override_fn = "another_custom_fn_name"]
+    table1: DBMap<String, String>,
+    table2: DBMap<i32, String>,
+    #[defuault_options_override_fn = "custom_fn_name"]
+    table3: DBMap<i32, String>,
+    #[defuault_options_override_fn = "another_custom_fn_name"]
+    table4: DBMap<i32, String>,
+}
+
+lazy_static! {
+    static ref TABLE1_OPTIONS_SET_FLAG: Mutex<Vec<bool>> = Mutex::new(vec![]);
+}
+
+lazy_static! {
+    static ref TABLE2_OPTIONS_SET_FLAG: Mutex<Vec<bool>> = Mutex::new(vec![]);
+}
+
+fn custom_fn_name() -> Options {
+    TABLE1_OPTIONS_SET_FLAG.lock().unwrap().push(false);
+    Options::default()
+}
+
+fn another_custom_fn_name() -> Options {
+    TABLE2_OPTIONS_SET_FLAG.lock().unwrap().push(false);
+    TABLE2_OPTIONS_SET_FLAG.lock().unwrap().push(false);
+    TABLE2_OPTIONS_SET_FLAG.lock().unwrap().push(false);
+    Options::default()
+}
+
 #[tokio::test]
 async fn macro_test_configure() {
     let primary_path = temp_dir();
@@ -153,4 +169,16 @@ async fn macro_test_configure() {
 
     // Build and open with new config
     let _ = Tables::open_tables_read_write(primary_path, None, Some(config.build()));
+
+    let primary_path = temp_dir();
+
+    assert_eq!(TABLE1_OPTIONS_SET_FLAG.lock().unwrap().len(), 0);
+
+    let _ = TablesCustomOptions::open_tables_read_write(primary_path, None, None);
+
+    // Ensures that the function to set options was called
+    assert_eq!(TABLE1_OPTIONS_SET_FLAG.lock().unwrap().len(), 1);
+
+    // `another_custom_fn_name` is called twice, so 6 items in vec
+    assert_eq!(TABLE2_OPTIONS_SET_FLAG.lock().unwrap().len(), 6);
 }

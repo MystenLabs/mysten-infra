@@ -5,7 +5,7 @@ use rocksdb::Options;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{borrow::Borrow, collections::BTreeMap, error::Error, path::PathBuf};
 
-use crate::rocks::default_rocksdb_options;
+use crate::rocks::{default_rocksdb_options, DBMapTableConfigMap, TypedStoreError};
 
 pub trait Map<'a, K, V>
 where
@@ -88,21 +88,21 @@ where
 pub trait DBMapTableUtil {
     fn open_tables_read_write(
         path: PathBuf,
-        db_options: Option<Options>,
-        tables_db_options: Option<DBMapTableConfigurator>,
+        global_db_options_override: Option<Options>,
+        tables_db_options_override: Option<DBMapTableConfigMap>,
     ) -> Self;
 
     fn open_tables_read_only(
         path: PathBuf,
         with_secondary_path: Option<PathBuf>,
-        db_options: Option<Options>,
+        global_db_options_override: Option<Options>,
     ) -> Self;
 
     fn open_tables_impl(
         path: PathBuf,
         with_secondary_path: Option<PathBuf>,
-        db_options: Option<Options>,
-        tables_db_options: Option<DBMapTableConfigurator>,
+        global_db_options_override: Option<Options>,
+        tables_db_options_override: Option<DBMapTableConfigMap>,
     ) -> Self;
 
     /// Dumps all the entries in the page of the table
@@ -117,6 +117,8 @@ pub trait DBMapTableUtil {
     /// Counts the keys in the table
     #[pre("Must be called only after `open_tables_read_only`")]
     fn count_keys(&self, table_name: &str) -> anyhow::Result<usize>;
+
+    fn get_memory_usage(&self) -> Result<(u64, u64), TypedStoreError>;
 
     /// List all the tables at this path
     /// Tables must be opened in read only mode using `open_tables_read_only`
@@ -174,17 +176,5 @@ pub trait DBMapTableUtil {
         point_lookup.set_memtable_whole_key_filtering(true);
 
         point_lookup
-    }
-}
-
-#[derive(Clone)]
-pub struct DBMapTableConfigurator(BTreeMap<String, Options>);
-impl DBMapTableConfigurator {
-    pub fn new(map: BTreeMap<String, Options>) -> Self {
-        Self(map)
-    }
-
-    pub fn to_map(&self) -> BTreeMap<String, Options> {
-        self.0.clone()
     }
 }

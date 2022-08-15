@@ -7,27 +7,22 @@ use quote::quote;
 use syn::Type::{self};
 use syn::{
     parse_macro_input, AngleBracketedGenericArguments, Attribute, Generics, ItemStruct, Lit, Meta,
-    NestedMeta, PathArguments,
+    PathArguments,
 };
 
-const DEFAULT_CACHE_CAPACITY: usize = 300_000;
-const DB_OPTIONS_ATTR_NAME: &str = "options";
-const DB_OPTIONS_OPTIMIZATION_ATTR_NAME: &str = "optimization";
-const DB_OPTIONS_CACHE_CAPACITY_ATTR_NAME: &str = "cache_capacity";
-const DB_OPTIONS_POINT_LOOKUP_ATTR_NAME: &str = "point_lookup";
+// This is used as default when none is specified
+const DEFAULT_DB_OPTIONS_CUSTOM_FN: &str = "typed_store::rocks::default_rocksdb_options";
+// Custom function which returns the option and overrides the defaults for this table
+const DB_OPTIONS_CUSTOM_FUNCTION: &str = "defuault_options_override_fn";
 
-/// Commonly used options
-struct TableOptions {
-    pub point_lookup: bool,
-    pub cache_capacity: usize,
+/// Options can either be simplified form or
+enum GeneralTableOptions {
+    OverrideFunction(String),
 }
 
-impl Default for TableOptions {
+impl Default for GeneralTableOptions {
     fn default() -> Self {
-        TableOptions {
-            point_lookup: false,
-            cache_capacity: DEFAULT_CACHE_CAPACITY,
-        }
+        Self::OverrideFunction(DEFAULT_DB_OPTIONS_CUSTOM_FN.to_owned())
     }
 }
 
@@ -35,7 +30,18 @@ impl Default for TableOptions {
 /// It operates on a struct where all the members are DBMap<K, V>
 /// `DBMapTableUtil` traits are then derived
 /// We can also supply column family options on the default ones
-///  #[options(optimization = "point_lookup", cache_capacity = "1000000")]
+/// A user defined function of signature () -> Options can be provided for each table
+///
+/// Example
+/// ```
+/// fn custom_fn_name() -> Options {
+///     Options::default()
+/// }
+/// ```
+/// can be used on a table by applying the attr:
+/// ```
+/// #[defuault_options_override_fn = "custom_fn_name"]
+///```
 ///
 /// The typical flow for creating tables is to define a struct of DBMap tables, create the column families, then reopen
 /// If dumping is needed, there's an additional step of implementing a way to match and dump each table
@@ -54,13 +60,12 @@ impl Default for TableOptions {
 /// #[derive(DBMapUtils)]
 /// struct Tables {
 ///     /// Specify some or no options for each field
-///     /// Valid options are currently `optimization = "point_lookup"` and `cache_capacity = <Uint>`
-///     #[options(optimization = "point_lookup", cache_capacity = 100000)]
+///     #[defuault_options_override_fn = "custom_fn_name1"]
 ///     table1: DBMap<String, String>,
-///     #[options(optimization = "point_lookup")]
+///     #[defuault_options_override_fn = "custom_fn_name2"]
 ///     table2: DBMap<i32, String>,
 ///     table3: DBMap<i32, String>,
-///     #[options()]
+///     #[defuault_options_override_fn = "custom_fn_name1"]
 ///     table4: DBMap<i32, String>,
 /// }
 ///
@@ -91,7 +96,7 @@ impl Default for TableOptions {
 /// //     bad_field: u32,
 /// // #}
 /// ```
-#[proc_macro_derive(DBMapUtils, attributes(options))]
+#[proc_macro_derive(DBMapUtils, attributes(options, defuault_options_override_fn))]
 pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let name = &input.ident;
@@ -100,10 +105,13 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
 
     let (field_names, inner_types, derived_table_options, simple_field_type_name) =
         extract_struct_info(input.clone());
-    let (cache_capacity, point_lookup): (Vec<_>, Vec<_>) = derived_table_options
+    let defuault_options_override_fn_names: Vec<proc_macro2::TokenStream> = derived_table_options
         .iter()
-        .map(|q| (q.cache_capacity, q.point_lookup))
-        .unzip();
+        .map(|q| {
+            let GeneralTableOptions::OverrideFunction(fn_name) = q;
+            fn_name.parse().unwrap()
+        })
+        .collect();
 
     let precondition_str = "#[pre(\"Must be called only after `open_tables_read_only`\")]";
     let _precondition_str_tok: proc_macro2::TokenStream = precondition_str.parse().unwrap();
@@ -111,8 +119,13 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
         "std::fmt::Debug + serde::Serialize + for<'de> serde::de::Deserialize<'de>";
     let generics_bounds_token: proc_macro2::TokenStream = generics_bounds.parse().unwrap();
 
-    let config_struct_name_str = format!("{}Config", name);
+    let config_struct_name_str = format!("{}Configurator", name);
     let config_struct_name: proc_macro2::TokenStream = config_struct_name_str.parse().unwrap();
+
+    let first_field_name = field_names
+        .get(0)
+        .expect("Expected at least one field")
+        .clone();
 
     // TODO: use this to disambiguate Store from DBMap when unifying both
     let _simple_field_type_name: proc_macro2::TokenStream = simple_field_type_name.parse().unwrap();
@@ -130,14 +143,14 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
             pub fn init() -> Self {
                 Self {
                     #(
-                        #field_names : rocksdb::Options::default(),
+                        #field_names : typed_store::rocks::default_rocksdb_options(),
                     )*
                 }
             }
 
             /// Build a config
-            pub fn build(&self) -> typed_store::traits::DBMapTableConfigurator {
-                typed_store::traits::DBMapTableConfigurator::new([
+            pub fn build(&self) -> typed_store::rocks::DBMapTableConfigMap {
+                typed_store::rocks::DBMapTableConfigMap::new([
                     #(
                         (stringify!(#field_names).to_owned(), self.#field_names.clone()),
                     )*
@@ -164,25 +177,25 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
             /// Only one process is allowed to do this at a time
             fn open_tables_read_write(
                 path: std::path::PathBuf,
-                global_db_options: Option<rocksdb::Options>,
-                tables_db_options: Option<typed_store::traits::DBMapTableConfigurator>
+                global_db_options_override: Option<rocksdb::Options>,
+                tables_db_options_override: Option<typed_store::rocks::DBMapTableConfigMap>
             ) -> Self {
-                Self::open_tables_impl(path, None, global_db_options, tables_db_options)
+                Self::open_tables_impl(path, None, global_db_options_override, tables_db_options_override)
             }
 
             /// Open in read only mode. No limitation on number of processes to do this
             fn open_tables_read_only(
                 path: std::path::PathBuf,
                 with_secondary_path: Option<std::path::PathBuf>,
-                db_options: Option<rocksdb::Options>,
+                global_db_options_override: Option<rocksdb::Options>,
             ) -> Self {
                 match with_secondary_path {
-                    Some(q) => Self::open_tables_impl(path, Some(q), db_options, None),
+                    Some(q) => Self::open_tables_impl(path, Some(q), global_db_options_override, None),
                     None => {
                         let p: std::path::PathBuf = tempfile::tempdir()
                         .expect("Failed to open temporary directory")
                         .into_path();
-                        Self::open_tables_impl(path, Some(p), db_options, None)
+                        Self::open_tables_impl(path, Some(p), global_db_options_override, None)
                     }
                 }
             }
@@ -192,15 +205,15 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
             fn open_tables_impl(
                 path: std::path::PathBuf,
                 with_secondary_path: Option<std::path::PathBuf>,
-                db_options: Option<rocksdb::Options>,
-                tables_db_options: Option<typed_store::traits::DBMapTableConfigurator>
+                global_db_options_override: Option<rocksdb::Options>,
+                tables_db_options_override: Option<typed_store::rocks::DBMapTableConfigMap>
             ) -> Self {
                 let path = &path;
                 let db = {
-                    let opt_cfs = match tables_db_options {
+                    let opt_cfs = match tables_db_options_override {
                         None => [
                             #(
-                                (stringify!(#field_names).to_owned(), Self::adjusted_db_options(None, #cache_capacity, #point_lookup).clone()),
+                                (stringify!(#field_names).to_owned(), #defuault_options_override_fn_names()),
                             )*
                         ],
                         Some(o) => [
@@ -213,14 +226,9 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
                     let opt_cfs: Vec<_> = opt_cfs.iter().map(|q| (q.0.as_str(), &q.1)).collect();
 
                     let res = match with_secondary_path {
-                        Some(p) => typed_store::rocks::open_cf_opts_secondary(path, Some(&p), db_options, &opt_cfs),
-                        None    => typed_store::rocks::open_cf_opts(path, db_options, &opt_cfs)
+                        Some(p) => typed_store::rocks::open_cf_opts_secondary(path, Some(&p), global_db_options_override, &opt_cfs),
+                        None    => typed_store::rocks::open_cf_opts(path, global_db_options_override, &opt_cfs)
                     };
-                    // if let Some(p) = with_secondary_path {
-                    //     typed_store::rocks::open_cf_opts_secondary(path, Some(&p), db_options, &opt_cfs[..])
-                    // } else {
-                    //     typed_store::rocks::open_cf_opts(path, db_options, &opt_cfs[..])
-                    // }
                     res
                 }.expect("Cannot open DB.");
 
@@ -277,6 +285,13 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
                     _ => anyhow::bail!("No such table name: {}", table_name),
                 })
             }
+
+            /// This gives info about memory usage
+            fn get_memory_usage(&self) -> Result<(u64, u64), typed_store::rocks::TypedStoreError> {
+                let stats = rocksdb::perf::get_memory_usage_stats(Some(&[&self.#first_field_name.rocksdb]), None)
+                    .map_err(|e| typed_store::rocks::TypedStoreError::RocksDBError(e.to_string()))?;
+                Ok((stats.mem_table_total, stats.cache_total))
+            }
         }
     })
 }
@@ -287,20 +302,21 @@ fn extract_struct_info(
 ) -> (
     Vec<Ident>,
     Vec<AngleBracketedGenericArguments>,
-    Vec<TableOptions>,
+    Vec<GeneralTableOptions>,
     String,
 ) {
     let info = input.fields.iter().map(|f| {
         let attrs: Vec<_> = f
             .attrs
             .iter()
-            .filter(|a| a.path.is_ident(DB_OPTIONS_ATTR_NAME))
+            .filter(|a| a.path.is_ident(DB_OPTIONS_CUSTOM_FUNCTION))
             .collect();
-
         let options = if attrs.is_empty() {
-            TableOptions::default()
+            GeneralTableOptions::default()
         } else {
-            get_options(attrs.get(0).unwrap()).unwrap()
+            GeneralTableOptions::OverrideFunction(
+                get_options_override_function(attrs.get(0).unwrap()).unwrap(),
+            )
         };
 
         let ty = &f.ty;
@@ -310,21 +326,21 @@ fn extract_struct_info(
                 if let PathArguments::AngleBracketed(angle_bracket_type) = &type_info.arguments {
                     angle_bracket_type.clone()
                 } else {
-                    panic!("All struct members must be of type DMBap<K, V> or Store<K, V>");
+                    panic!("All struct members must be of type DMBap<K, V>");
                 };
 
             let type_str = format!("{}", &type_info.ident);
             // Rough way to check that this is DBMap
-            if type_str == "DBMap" || type_str == "Store" {
+            if type_str == "DBMap" {
                 return (
                     (f.ident.as_ref().unwrap().clone(), type_str),
                     (inner_type, options),
                 );
             } else {
-                panic!("All struct members must be of type DMBap<K, V> or Store<K, V>");
+                panic!("All struct members must be of type DMBap<K, V>");
             }
         }
-        panic!("All struct members must be of type DMBap<K, V> or Store<K, V>");
+        panic!("All struct members must be of type DMBap<K, V>");
     });
 
     let (field_info, inner_types_with_opts): (Vec<_>, Vec<_>) = info.unzip();
@@ -351,100 +367,36 @@ fn extract_struct_info(
     )
 }
 
-/// Extracts the options from attribute
-/// Valid options are `optimization = "point_lookup"` and `cache_capacity = <usize>
-fn get_options(attr: &Attribute) -> syn::Result<TableOptions> {
+/// Extracts the table options override function
+/// The function must take no args and return Options
+fn get_options_override_function(attr: &Attribute) -> syn::Result<String> {
     let meta = attr.parse_meta()?;
 
-    let meta_list = match meta {
-        Meta::List(list) => list,
+    let val = match meta.clone() {
+        Meta::NameValue(val) => val,
         _ => {
             return Err(syn::Error::new_spanned(
                 meta,
-                "Expected attribute list of options",
+                format!("Expected function name in format `#[{DB_OPTIONS_CUSTOM_FUNCTION} = {{function_name}}]`"),
             ))
         }
     };
 
-    let tokens = match meta_list.nested.len() {
-        0 => {
-            return Ok(TableOptions {
-                point_lookup: false,
-                cache_capacity: DEFAULT_CACHE_CAPACITY,
-            })
-        }
-        1 | 2 => &meta_list.nested,
-        _ => {
-            return Err(syn::Error::new_spanned(
-                meta_list.nested,
-                format!("At most 2 attributes allowed: `{DB_OPTIONS_OPTIMIZATION_ATTR_NAME}` and/or `{DB_OPTIONS_CACHE_CAPACITY_ATTR_NAME}`"),
-            ));
-        }
-    };
-
-    let mut point_lookup = None;
-    let mut cache_capacity: Option<usize> = None;
-
-    for t in tokens {
-        let name_val = match t {
-            NestedMeta::Meta(Meta::NameValue(nv)) => nv,
-            _ => return Err(syn::Error::new_spanned(t, "Expected `<opt> = \"<value>\"`")),
-        };
-
-        if name_val.path.is_ident(DB_OPTIONS_CACHE_CAPACITY_ATTR_NAME) {
-            if cache_capacity.is_some() {
-                return Err(syn::Error::new_spanned(
-                    name_val,
-                    format!("Duplicate entry for `{DB_OPTIONS_CACHE_CAPACITY_ATTR_NAME}`"),
-                ));
-            }
-            cache_capacity = match &name_val.lit {
-                Lit::Int(i) => Some(i.base10_parse().unwrap()),
-                _ => {
-                    return Err(syn::Error::new_spanned(
-                        t,
-                        format!(
-                            "Expected unsigned integer for `{DB_OPTIONS_CACHE_CAPACITY_ATTR_NAME}`"
-                        ),
-                    ))
-                }
-            };
-        } else if name_val.path.is_ident(DB_OPTIONS_OPTIMIZATION_ATTR_NAME) {
-            if point_lookup.is_some() {
-                return Err(syn::Error::new_spanned(
-                    name_val,
-                    format!("Duplicate entry for `{DB_OPTIONS_OPTIMIZATION_ATTR_NAME}`"),
-                ));
-            }
-            let opt = match &name_val.lit {
-                Lit::Str(s) => s.value(),
-                _ => {
-                    return Err(syn::Error::new_spanned(
-                        t,
-                        format!("Expected string for `{DB_OPTIONS_OPTIMIZATION_ATTR_NAME}`"),
-                    ))
-                }
-            };
-
-            if opt != DB_OPTIONS_POINT_LOOKUP_ATTR_NAME {
-                return Err(syn::Error::new_spanned(
-                    t,
-                    format!("Only `{DB_OPTIONS_POINT_LOOKUP_ATTR_NAME}`  supported for `{DB_OPTIONS_OPTIMIZATION_ATTR_NAME}`"),
-                ));
-            }
-            point_lookup = Some(true);
-        } else {
-            return Err(syn::Error::new_spanned(
-                t,
-                format!("Only `{DB_OPTIONS_OPTIMIZATION_ATTR_NAME}` and `{DB_OPTIONS_CACHE_CAPACITY_ATTR_NAME}` are valid options"),
-            ));
-        }
+    if !val.path.is_ident(DB_OPTIONS_CUSTOM_FUNCTION) {
+        return Err(syn::Error::new_spanned(
+            meta,
+            format!("Expected function name in format `#[{DB_OPTIONS_CUSTOM_FUNCTION} = {{function_name}}]`"),
+        ));
     }
 
-    Ok(TableOptions {
-        point_lookup: point_lookup.is_some(),
-        cache_capacity: cache_capacity.unwrap_or(DEFAULT_CACHE_CAPACITY),
-    })
+    let fn_name = match val.lit {
+        Lit::Str(fn_name) => fn_name,
+        _ => return Err(syn::Error::new_spanned(
+            meta,
+            format!("Expected function name in format `#[{DB_OPTIONS_CUSTOM_FUNCTION} = {{function_name}}]`"),
+        ))
+    };
+    Ok(fn_name.value())
 }
 
 fn extract_generics_names(generics: &Generics) -> Vec<Ident> {

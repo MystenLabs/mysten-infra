@@ -10,7 +10,7 @@ use bincode::Options;
 use collectable::TryExtend;
 use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, WriteBatch};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{borrow::Borrow, marker::PhantomData, path::Path, sync::Arc};
+use std::{borrow::Borrow, collections::BTreeMap, marker::PhantomData, path::Path, sync::Arc};
 use tracing::instrument;
 
 use self::{iter::Iter, keys::Keys, values::Values};
@@ -556,4 +556,16 @@ where
         .with_fixint_encoding()
         .serialize(t)
         .map_err(|e| e.into())
+}
+
+#[derive(Clone)]
+pub struct DBMapTableConfigMap(BTreeMap<String, rocksdb::Options>);
+impl DBMapTableConfigMap {
+    pub fn new(map: BTreeMap<String, rocksdb::Options>) -> Self {
+        Self(map)
+    }
+
+    pub fn to_map(&self) -> BTreeMap<String, rocksdb::Options> {
+        self.0.clone()
+    }
 }
