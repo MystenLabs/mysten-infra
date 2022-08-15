@@ -252,7 +252,7 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
             /// TODO: use preconditions to ensure call after `open_tables_read_only`
             // #_precondition_str_tok
             fn dump(&self, table_name: &str, page_size: u16,
-                page_number: usize) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
+                page_number: usize) -> eyre::Result<std::collections::BTreeMap<String, String>> {
                 Ok(match table_name {
                     #(
                         stringify!(#field_names) => {
@@ -265,7 +265,7 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
                         }
                     )*
 
-                    _ => anyhow::bail!("No such table name: {}", table_name),
+                    _ => eyre::bail!("No such table name: {}", table_name),
                 })
             }
 
@@ -273,7 +273,7 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
             /// Tables must be opened in read only mode using `open_tables_read_only`
             /// TODO: use preconditions to ensure call after `open_tables_read_only`
             // #_precondition_str_tok
-            fn count_keys(&self, table_name: &str) -> anyhow::Result<usize> {
+            fn count_keys(&self, table_name: &str) -> eyre::Result<usize> {
                 Ok(match table_name {
                     #(
                         stringify!(#field_names) => {
@@ -282,7 +282,7 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
                         }
                     )*
 
-                    _ => anyhow::bail!("No such table name: {}", table_name),
+                    _ => eyre::bail!("No such table name: {}", table_name),
                 })
             }
 

@@ -112,11 +112,11 @@ pub trait DBMapTableUtil {
         table_name: &str,
         page_size: u16,
         page_number: usize,
-    ) -> anyhow::Result<BTreeMap<String, String>>;
+    ) -> eyre::Result<BTreeMap<String, String>>;
 
     /// Counts the keys in the table
     #[pre("Must be called only after `open_tables_read_only`")]
-    fn count_keys(&self, table_name: &str) -> anyhow::Result<usize>;
+    fn count_keys(&self, table_name: &str) -> eyre::Result<usize>;
 
     fn get_memory_usage(&self) -> Result<(u64, u64), TypedStoreError>;
 
@@ -124,7 +124,7 @@ pub trait DBMapTableUtil {
     /// Tables must be opened in read only mode using `open_tables_read_only`
     /// TODO: use preconditions to ensure call after `open_tables_read_only`
     // #_precondition_str_tok
-    fn list_tables(path: std::path::PathBuf) -> anyhow::Result<Vec<String>> {
+    fn list_tables(path: std::path::PathBuf) -> eyre::Result<Vec<String>> {
         const DB_DEFAULT_CF_NAME: &str = "default";
 
         let opts = rocksdb::Options::default();
