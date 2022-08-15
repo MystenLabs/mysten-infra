@@ -170,6 +170,7 @@ async fn macro_test_configure() {
     // Build and open with new config
     let _ = Tables::open_tables_read_write(primary_path, None, Some(config.build()));
 
+    // Test the static config options
     let primary_path = temp_dir();
 
     assert_eq!(TABLE1_OPTIONS_SET_FLAG.lock().unwrap().len(), 0);
@@ -181,4 +182,28 @@ async fn macro_test_configure() {
 
     // `another_custom_fn_name` is called twice, so 6 items in vec
     assert_eq!(TABLE2_OPTIONS_SET_FLAG.lock().unwrap().len(), 6);
+}
+
+/// We show that custom functions can be applied
+#[derive(DBMapUtils)]
+struct TablesMemUsage {
+    table1: DBMap<String, String>,
+    table2: DBMap<i32, String>,
+    table3: DBMap<i32, String>,
+    table4: DBMap<i32, String>,
+}
+
+#[tokio::test]
+async fn macro_test_get_memory_usage() {
+    let primary_path = temp_dir();
+    let tables = TablesMemUsage::open_tables_read_write(primary_path, None, None);
+
+    let keys_vals_1 = (1..1000).map(|i| (i.to_string(), i.to_string()));
+    tables
+        .table1
+        .multi_insert(keys_vals_1)
+        .expect("Failed to multi-insert");
+
+    let (mem_table, _) = tables.get_memory_usage().unwrap();
+    assert!(mem_table > 0);
 }
