@@ -67,7 +67,7 @@ impl Default for GeneralTableOptions {
 /// }
 /// #[derive(DBMapUtils)]
 /// struct Tables {
-///     /// Specify some or no options for each field
+///     /// Specify custom options function `custom_fn_name1`
 ///     #[defuault_options_override_fn = "custom_fn_name1"]
 ///     table1: DBMap<String, String>,
 ///     #[defuault_options_override_fn = "custom_fn_name2"]
