@@ -13,7 +13,7 @@ use syn::{
 // This is used as default when none is specified
 const DEFAULT_DB_OPTIONS_CUSTOM_FN: &str = "typed_store::rocks::default_rocksdb_options";
 // Custom function which returns the option and overrides the defaults for this table
-const DB_OPTIONS_CUSTOM_FUNCTION: &str = "defuault_options_override_fn";
+const DB_OPTIONS_CUSTOM_FUNCTION: &str = "default_options_override_fn";
 
 /// Options can either be simplified form or
 enum GeneralTableOptions {
@@ -32,21 +32,10 @@ impl Default for GeneralTableOptions {
 /// We can also supply column family options on the default ones
 /// A user defined function of signature () -> Options can be provided for each table
 /// If a an override function is not specified, the default in `typed_store::rocks::default_rocksdb_options` is used
-/// Example
-/// ```rust,ignore
-/// fn custom_fn_name() -> Options {
-///     Options::default()
-/// }
-/// ```
-/// can be used on a table by applying the attr:
-/// ``` rust,ignore
-/// #[defuault_options_override_fn = "custom_fn_name"]
-///```
-///
-/// The typical flow for creating tables is to define a struct of DBMap tables, create the column families, then reopen
+/// The old way creating tables is to define a struct of DBMap tables, create the column families, then reopen
 /// If dumping is needed, there's an additional step of implementing a way to match and dump each table
 ///
-/// We remove the need for all these steps by auto deriving the member functions.
+/// We remove the need for all these steps by auto deriving the member functions for opening, confguring, dumping, etc.
 ///
 /// # Examples
 ///
@@ -68,12 +57,13 @@ impl Default for GeneralTableOptions {
 /// #[derive(DBMapUtils)]
 /// struct Tables {
 ///     /// Specify custom options function `custom_fn_name1`
-///     #[defuault_options_override_fn = "custom_fn_name1"]
+///     #[default_options_override_fn = "custom_fn_name1"]
 ///     table1: DBMap<String, String>,
-///     #[defuault_options_override_fn = "custom_fn_name2"]
+///     #[default_options_override_fn = "custom_fn_name2"]
 ///     table2: DBMap<i32, String>,
+///     // Nothing specifed so `typed_store::rocks::default_rocksdb_options` is used
 ///     table3: DBMap<i32, String>,
-///     #[defuault_options_override_fn = "custom_fn_name1"]
+///     #[default_options_override_fn = "custom_fn_name1"]
 ///     table4: DBMap<i32, String>,
 /// }
 ///
@@ -104,7 +94,7 @@ impl Default for GeneralTableOptions {
 /// //     bad_field: u32,
 /// // #}
 /// ```
-#[proc_macro_derive(DBMapUtils, attributes(options, defuault_options_override_fn))]
+#[proc_macro_derive(DBMapUtils, attributes(options, default_options_override_fn))]
 pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let name = &input.ident;
@@ -113,7 +103,7 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
 
     let (field_names, inner_types, derived_table_options, simple_field_type_name) =
         extract_struct_info(input.clone());
-    let defuault_options_override_fn_names: Vec<proc_macro2::TokenStream> = derived_table_options
+    let default_options_override_fn_names: Vec<proc_macro2::TokenStream> = derived_table_options
         .iter()
         .map(|q| {
             let GeneralTableOptions::OverrideFunction(fn_name) = q;
@@ -183,6 +173,8 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
             > DBMapTableUtil for #name #generics{
             /// Opens a set of tables in read-write mode
             /// Only one process is allowed to do this at a time
+            /// `global_db_options_override` apply to the whole DB
+            /// `tables_db_options_override` apply to each table. If `None`, the attributes from `default_options_override_fn` are used if any
             fn open_tables_read_write(
                 path: std::path::PathBuf,
                 global_db_options_override: Option<rocksdb::Options>,
@@ -221,7 +213,7 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
                     let opt_cfs = match tables_db_options_override {
                         None => [
                             #(
-                                (stringify!(#field_names).to_owned(), #defuault_options_override_fn_names()),
+                                (stringify!(#field_names).to_owned(), #default_options_override_fn_names()),
                             )*
                         ],
                         Some(o) => [
@@ -294,7 +286,7 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
                 })
             }
 
-            /// This gives info about memory usage
+            /// This gives info about memory usage and returns a tuple of total table memory usage and cache memory usage
             fn get_memory_usage(&self) -> Result<(u64, u64), typed_store::rocks::TypedStoreError> {
                 let stats = rocksdb::perf::get_memory_usage_stats(Some(&[&self.#first_field_name.rocksdb]), None)
                     .map_err(|e| typed_store::rocks::TypedStoreError::RocksDBError(e.to_string()))?;

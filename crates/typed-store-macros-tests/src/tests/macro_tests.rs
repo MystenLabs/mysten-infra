@@ -1,7 +1,7 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use lazy_static::lazy_static; // 1.4.0
+use once_cell::sync::Lazy;
 use rocksdb::Options;
 use serde::Deserialize;
 use serde::Serialize;
@@ -122,22 +122,19 @@ async fn macro_test() {
 /// We show that custom functions can be applied
 #[derive(DBMapUtils)]
 struct TablesCustomOptions {
-    #[defuault_options_override_fn = "another_custom_fn_name"]
+    #[default_options_override_fn = "another_custom_fn_name"]
     table1: DBMap<String, String>,
     table2: DBMap<i32, String>,
-    #[defuault_options_override_fn = "custom_fn_name"]
+    #[default_options_override_fn = "custom_fn_name"]
     table3: DBMap<i32, String>,
-    #[defuault_options_override_fn = "another_custom_fn_name"]
+    #[default_options_override_fn = "another_custom_fn_name"]
     table4: DBMap<i32, String>,
 }
 
-lazy_static! {
-    static ref TABLE1_OPTIONS_SET_FLAG: Mutex<Vec<bool>> = Mutex::new(vec![]);
-}
+//static TABLE1_OPTIONS_SET_FLAG: OnceCell<Vec<bool>> = OnceCell::new();
 
-lazy_static! {
-    static ref TABLE2_OPTIONS_SET_FLAG: Mutex<Vec<bool>> = Mutex::new(vec![]);
-}
+static TABLE1_OPTIONS_SET_FLAG: Lazy<Mutex<Vec<bool>>> = Lazy::new(|| Mutex::new(vec![]));
+static TABLE2_OPTIONS_SET_FLAG: Lazy<Mutex<Vec<bool>>> = Lazy::new(|| Mutex::new(vec![]));
 
 fn custom_fn_name() -> Options {
     TABLE1_OPTIONS_SET_FLAG.lock().unwrap().push(false);
