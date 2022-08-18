@@ -411,8 +411,6 @@ fn extract_generics_names(generics: &Generics) -> Vec<Ident> {
         .collect()
 }
 
-
-
 /// A helper macro to simplify common operations for opening and dumping structs of DBMaps
 /// It operates on a struct where all the members are Store<K, V>
 /// `DBMapTableUtil` traits are then derived
