@@ -178,3 +178,27 @@ pub trait DBMapTableUtil {
         point_lookup
     }
 }
+
+/// Traits for DBMap table groups
+/// Table needs to be opened to secondary (read only) mode for most features here to work
+/// This trait is needed for #[derive(DBMapUtils)] on structs which have all members as DBMap<K, V>
+pub trait StoreTableUtil {
+    fn open_tables_read_write(
+        path: PathBuf,
+        global_db_options_override: Option<Options>,
+        tables_db_options_override: Option<DBMapTableConfigMap>,
+    ) -> Self;
+
+    fn open_tables_read_only(
+        path: PathBuf,
+        with_secondary_path: Option<PathBuf>,
+        global_db_options_override: Option<Options>,
+    ) -> Self;
+
+    fn open_tables_impl(
+        path: PathBuf,
+        with_secondary_path: Option<PathBuf>,
+        global_db_options_override: Option<Options>,
+        tables_db_options_override: Option<DBMapTableConfigMap>,
+    ) -> Self;
+}

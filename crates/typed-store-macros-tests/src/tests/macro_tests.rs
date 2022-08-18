@@ -11,7 +11,10 @@ use std::sync::Mutex;
 use typed_store::rocks::DBMap;
 use typed_store::traits::DBMapTableUtil;
 use typed_store::traits::Map;
+use typed_store::traits::StoreTableUtil;
+use typed_store::Store;
 use typed_store_macros::DBMapUtils;
+use typed_store_macros::StoreUtils;
 
 fn temp_dir() -> std::path::PathBuf {
     tempfile::tempdir()
@@ -131,8 +134,6 @@ struct TablesCustomOptions {
     table4: DBMap<i32, String>,
 }
 
-//static TABLE1_OPTIONS_SET_FLAG: OnceCell<Vec<bool>> = OnceCell::new();
-
 static TABLE1_OPTIONS_SET_FLAG: Lazy<Mutex<Vec<bool>>> = Lazy::new(|| Mutex::new(vec![]));
 static TABLE2_OPTIONS_SET_FLAG: Lazy<Mutex<Vec<bool>>> = Lazy::new(|| Mutex::new(vec![]));
 
@@ -203,4 +204,59 @@ async fn macro_test_get_memory_usage() {
 
     let (mem_table, _) = tables.get_memory_usage().unwrap();
     assert!(mem_table > 0);
+}
+
+#[derive(StoreUtils)]
+struct StoreTables {
+    table1: Store<Vec<u8>, Vec<u8>>,
+    _table2: Store<i32, String>,
+}
+
+#[tokio::test]
+async fn store_iter_and_filter_successfully() {
+    // Use constom configurator
+    let mut config = StoreTables::configurator();
+    // Config table 1
+    config.table1 = Options::default();
+    config.table1.create_if_missing(true);
+    config.table1.set_write_buffer_size(123456);
+
+    // Config table 2
+    config._table2 = config.table1.clone();
+
+    config._table2.create_if_missing(false);
+
+    let str = StoreTables::open_tables_read_write(temp_dir(), None, Some(config.build()));
+
+    // AND key-values to store.
+    let key_values = vec![
+        (vec![0u8, 1u8], vec![4u8, 4u8]),
+        (vec![0u8, 2u8], vec![4u8, 5u8]),
+        (vec![0u8, 3u8], vec![4u8, 6u8]),
+        (vec![0u8, 4u8], vec![4u8, 7u8]),
+        (vec![0u8, 5u8], vec![4u8, 0u8]),
+        (vec![0u8, 6u8], vec![4u8, 1u8]),
+    ];
+
+    let result = str.table1.write_all(key_values.clone()).await;
+    assert!(result.is_ok());
+
+    // Iter through the keys
+    let output = str
+        .table1
+        .iter(Some(Box::new(|(k, _v)| {
+            u16::from_le_bytes(k[..2].try_into().unwrap()) % 2 == 0
+        })))
+        .await;
+    for (k, v) in &key_values {
+        let int = u16::from_le_bytes(k[..2].try_into().unwrap());
+        if int % 2 == 0 {
+            let v1 = output.get(k).unwrap();
+            assert_eq!(v1.first(), v.first());
+            assert_eq!(v1.last(), v.last());
+        } else {
+            assert!(output.get(k).is_none());
+        }
+    }
+    assert_eq!(output.len(), key_values.len());
 }

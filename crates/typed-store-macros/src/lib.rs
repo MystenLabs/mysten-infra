@@ -94,7 +94,7 @@ impl Default for GeneralTableOptions {
 /// //     bad_field: u32,
 /// // #}
 /// ```
-#[proc_macro_derive(DBMapUtils, attributes(options, default_options_override_fn))]
+#[proc_macro_derive(DBMapUtils, attributes(default_options_override_fn))]
 pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let name = &input.ident;
@@ -102,7 +102,7 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
     let generics_names = extract_generics_names(generics);
 
     let (field_names, inner_types, derived_table_options, simple_field_type_name) =
-        extract_struct_info(input.clone());
+        extract_struct_info(input.clone(), "DBMap".to_owned());
     let default_options_override_fn_names: Vec<proc_macro2::TokenStream> = derived_table_options
         .iter()
         .map(|q| {
@@ -296,9 +296,10 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
     })
 }
 
-// Extracts the field names, field types, inner types (K,V in DBMap<K, V>), and the options attrs
+// Extracts the field names, field types, inner types (K,V in {map_type_name}<K, V>), and the options attrs
 fn extract_struct_info(
     input: ItemStruct,
+    map_type_name: String,
 ) -> (
     Vec<Ident>,
     Vec<AngleBracketedGenericArguments>,
@@ -326,21 +327,21 @@ fn extract_struct_info(
                 if let PathArguments::AngleBracketed(angle_bracket_type) = &type_info.arguments {
                     angle_bracket_type.clone()
                 } else {
-                    panic!("All struct members must be of type DMBap<K, V>");
+                    panic!("All struct members must be of type {map_type_name}<K, V>");
                 };
 
             let type_str = format!("{}", &type_info.ident);
-            // Rough way to check that this is DBMap
-            if type_str == "DBMap" {
+            // Rough way to check that this is map_type_name
+            if type_str == map_type_name {
                 return (
                     (f.ident.as_ref().unwrap().clone(), type_str),
                     (inner_type, options),
                 );
             } else {
-                panic!("All struct members must be of type DMBap<K, V>");
+                panic!("All struct members must be of type {map_type_name}<K, V>");
             }
         }
-        panic!("All struct members must be of type DMBap<K, V>");
+        panic!("All struct members must be of type {map_type_name}<K, V>");
     });
 
     let (field_info, inner_types_with_opts): (Vec<_>, Vec<_>) = info.unzip();
@@ -408,4 +409,220 @@ fn extract_generics_names(generics: &Generics) -> Vec<Ident> {
             _ => panic!("Unspoorted generic type"),
         })
         .collect()
+}
+
+
+
+/// A helper macro to simplify common operations for opening and dumping structs of DBMaps
+/// It operates on a struct where all the members are Store<K, V>
+/// `DBMapTableUtil` traits are then derived
+/// We can also supply column family options on the default ones
+/// A user defined function of signature () -> Options can be provided for each table
+/// If a an override function is not specified, the default in `typed_store::rocks::default_rocksdb_options` is used
+/// The old way creating tables is to define a struct of Store tables, create the column families, then reopen
+///
+/// We remove the need for all these steps by auto deriving the member functions for opening, confguring, dumping, etc.
+///
+/// # Examples
+///
+/// Well formed struct of tables
+/// ```
+/// use rocksdb::Options;
+/// use typed_store::rocks::DBMap;
+/// use typed_store::Store;
+/// use typed_store_macros::DBMapUtils;
+/// use typed_store::traits::DBMapTableUtil;
+///
+/// /// Define a struct with all members having type Store<K, V>
+///
+/// fn custom_fn_name1() -> Options {Options::default()}
+/// fn custom_fn_name2() -> Options {
+///     let mut op = custom_fn_name1();
+///     op.set_write_buffer_size(123456);
+///     op
+/// }
+/// #[derive(DBMapUtils)]
+/// struct Tables {
+///     /// Specify custom options function `custom_fn_name1`
+///     #[default_options_override_fn = "custom_fn_name1"]
+///     table1: Store<String, String>,
+///     #[default_options_override_fn = "custom_fn_name2"]
+///     table2: Store<i32, String>,
+///     // Nothing specifed so `typed_store::rocks::default_rocksdb_options` is used
+///     table3: Store<i32, String>,
+///     #[default_options_override_fn = "custom_fn_name1"]
+///     table4: Store<i32, String>,
+/// }
+///
+/// /// All traits in `DBMapTableUtil` are automatically derived
+/// /// Use the struct like normal
+/// let primary_path = tempfile::tempdir().expect("Failed to open temporary directory").into_path();
+/// /// This is auto derived
+/// let tbls_primary = Tables::open_tables_read_write(primary_path.clone(), None, None);
+///
+/// /// Do some stuff with the DB
+///
+///
+/// // Bad usage example
+/// // Structs fields most only be of type Store<K, V>
+/// // This will fail to compile with error `All struct members must be of type DMBap<K, V>`
+/// // #[derive(DBMapUtils)]
+/// // struct BadTables {
+/// //     table1: Store<String, String>,
+/// //     bad_field: u32,
+/// // #}
+/// ```
+#[proc_macro_derive(StoreUtils, attributes(default_options_override_fn))]
+pub fn derive_store_utils(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    let name = &input.ident;
+    let generics = &input.generics;
+    let generics_names = extract_generics_names(generics);
+
+    let (field_names, inner_types, derived_table_options, simple_field_type_name) =
+        extract_struct_info(input.clone(), "Store".to_owned());
+    let default_options_override_fn_names: Vec<proc_macro2::TokenStream> = derived_table_options
+        .iter()
+        .map(|q| {
+            let GeneralTableOptions::OverrideFunction(fn_name) = q;
+            fn_name.parse().unwrap()
+        })
+        .collect();
+
+    println!("{:?} {}", field_names, name);
+
+    let generics_bounds =
+        "core::hash::Hash + core::cmp::Eq + std::fmt::Debug + serde::Serialize + for<'de> serde::de::Deserialize<'de> + core::marker::Send + 'static";
+    let generics_bounds_token: proc_macro2::TokenStream = generics_bounds.parse().unwrap();
+
+    let config_struct_name_str = format!("{}Configurator", name);
+    let config_struct_name: proc_macro2::TokenStream = config_struct_name_str.parse().unwrap();
+
+    // let first_field_name = field_names
+    //     .get(0)
+    //     .expect("Expected at least one field")
+    //     .clone();
+
+    let _simple_field_type_name: proc_macro2::TokenStream = simple_field_type_name.parse().unwrap();
+
+    TokenStream::from(quote! {
+        /// Create config structs for configuring Store tables
+        pub struct #config_struct_name {
+            #(
+                pub #field_names : rocksdb::Options,
+            )*
+        }
+
+        impl #config_struct_name {
+            /// Initialize to defaults
+            pub fn init() -> Self {
+                Self {
+                    #(
+                        #field_names : typed_store::rocks::default_rocksdb_options(),
+                    )*
+                }
+            }
+
+            /// Build a config
+            pub fn build(&self) -> typed_store::rocks::DBMapTableConfigMap {
+                typed_store::rocks::DBMapTableConfigMap::new([
+                    #(
+                        (stringify!(#field_names).to_owned(), self.#field_names.clone()),
+                    )*
+                ].into_iter().collect())
+            }
+        }
+
+        impl <
+                #(
+                    #generics_names: #generics_bounds_token,
+                )*
+            > #name #generics {
+
+                pub fn configurator() -> #config_struct_name {
+                    #config_struct_name::init()
+                }
+        }
+        impl <
+                #(
+                    #generics_names: #generics_bounds_token,
+                )*
+            > StoreTableUtil for #name #generics{
+            /// Opens a set of tables in read-write mode
+            /// Only one process is allowed to do this at a time
+            /// `global_db_options_override` apply to the whole DB
+            /// `tables_db_options_override` apply to each table. If `None`, the attributes from `default_options_override_fn` are used if any
+            fn open_tables_read_write(
+                path: std::path::PathBuf,
+                global_db_options_override: Option<rocksdb::Options>,
+                tables_db_options_override: Option<typed_store::rocks::DBMapTableConfigMap>
+            ) -> Self {
+                Self::open_tables_impl(path, None, global_db_options_override, tables_db_options_override)
+            }
+
+            /// Open in read only mode. No limitation on number of processes to do this
+            fn open_tables_read_only(
+                path: std::path::PathBuf,
+                with_secondary_path: Option<std::path::PathBuf>,
+                global_db_options_override: Option<rocksdb::Options>,
+            ) -> Self {
+                match with_secondary_path {
+                    Some(q) => Self::open_tables_impl(path, Some(q), global_db_options_override, None),
+                    None => {
+                        let p: std::path::PathBuf = tempfile::tempdir()
+                        .expect("Failed to open temporary directory")
+                        .into_path();
+                        Self::open_tables_impl(path, Some(p), global_db_options_override, None)
+                    }
+                }
+            }
+
+            /// Opens a set of tables in read-write mode
+            /// If with_secondary_path is set, the DB is opened in read only mode with the path specified
+            fn open_tables_impl(
+                path: std::path::PathBuf,
+                with_secondary_path: Option<std::path::PathBuf>,
+                global_db_options_override: Option<rocksdb::Options>,
+                tables_db_options_override: Option<typed_store::rocks::DBMapTableConfigMap>
+            ) -> Self {
+                let path = &path;
+                let db = {
+                    let opt_cfs = match tables_db_options_override {
+                        None => [
+                            #(
+                                (stringify!(#field_names).to_owned(), #default_options_override_fn_names()),
+                            )*
+                        ],
+                        Some(o) => [
+                            #(
+                                (stringify!(#field_names).to_owned(), o.to_map().get(stringify!(#field_names)).unwrap().clone()),
+                            )*
+                        ]
+                    };
+
+                    let opt_cfs: Vec<_> = opt_cfs.iter().map(|q| (q.0.as_str(), &q.1)).collect();
+
+                    let res = match with_secondary_path {
+                        Some(p) => typed_store::rocks::open_cf_opts_secondary(path, Some(&p), global_db_options_override, &opt_cfs),
+                        None    => typed_store::rocks::open_cf_opts(path, global_db_options_override, &opt_cfs)
+                    };
+                    res
+                }.expect("Cannot open DB.");
+
+                let (
+                        #(
+                            #field_names
+                        ),*
+                ) = (#(
+                        DBMap::#inner_types::reopen(&db, Some(stringify!(#field_names))).expect(&format!("Cannot open {} CF.", stringify!(#field_names))[..])
+                    ),*);
+
+                Self {
+                    #(
+                        #field_names: typed_store::Store::new(#field_names),
+                    )*
+                }
+            }
+        }
+    })
 }
