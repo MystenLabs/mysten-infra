@@ -428,8 +428,8 @@ fn extract_generics_names(generics: &Generics) -> Vec<Ident> {
 /// use rocksdb::Options;
 /// use typed_store::rocks::DBMap;
 /// use typed_store::Store;
-/// use typed_store_macros::DBMapUtils;
-/// use typed_store::traits::DBMapTableUtil;
+/// use typed_store_macros::StoreUtils;
+/// use typed_store::traits::StoreTableUtil;
 ///
 /// /// Define a struct with all members having type Store<K, V>
 ///
@@ -439,7 +439,7 @@ fn extract_generics_names(generics: &Generics) -> Vec<Ident> {
 ///     op.set_write_buffer_size(123456);
 ///     op
 /// }
-/// #[derive(DBMapUtils)]
+/// #[derive(StoreUtils)]
 /// struct Tables {
 ///     /// Specify custom options function `custom_fn_name1`
 ///     #[default_options_override_fn = "custom_fn_name1"]
@@ -454,12 +454,14 @@ fn extract_generics_names(generics: &Generics) -> Vec<Ident> {
 ///
 /// /// All traits in `DBMapTableUtil` are automatically derived
 /// /// Use the struct like normal
+/// #[tokio::main]
+/// async fn main() {
 /// let primary_path = tempfile::tempdir().expect("Failed to open temporary directory").into_path();
 /// /// This is auto derived
 /// let tbls_primary = Tables::open_tables_read_write(primary_path.clone(), None, None);
 ///
-/// /// Do some stuff with the DB
-///
+/// // Do some stuff with the DB
+/// }
 ///
 /// // Bad usage example
 /// // Structs fields most only be of type Store<K, V>
@@ -486,8 +488,6 @@ pub fn derive_store_utils(input: TokenStream) -> TokenStream {
             fn_name.parse().unwrap()
         })
         .collect();
-
-    println!("{:?} {}", field_names, name);
 
     let generics_bounds =
         "core::hash::Hash + core::cmp::Eq + std::fmt::Debug + serde::Serialize + for<'de> serde::de::Deserialize<'de> + core::marker::Send + 'static";
