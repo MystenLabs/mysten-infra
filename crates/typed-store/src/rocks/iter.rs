@@ -22,6 +22,24 @@ impl<'a, K: DeserializeOwned, V: DeserializeOwned> Iter<'a, K, V> {
             _phantom: PhantomData,
         }
     }
+
+    pub fn prev(&mut self) -> Option<(K, V)> {
+        if self.db_iter.valid() {
+            let config = bincode::DefaultOptions::new()
+                .with_big_endian()
+                .with_fixint_encoding();
+            let key = self.db_iter.key().and_then(|k| config.deserialize(k).ok());
+            let value = self
+                .db_iter
+                .value()
+                .and_then(|v| bincode::deserialize(v).ok());
+
+            self.db_iter.prev();
+            key.and_then(|k| value.map(|v| (k, v)))
+        } else {
+            None
+        }
+    }
 }
 
 impl<'a, K: DeserializeOwned, V: DeserializeOwned> Iterator for Iter<'a, K, V> {
