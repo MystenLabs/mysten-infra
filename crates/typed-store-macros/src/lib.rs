@@ -227,7 +227,7 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
 
                     let res = match with_secondary_path {
                         Some(p) => typed_store::rocks::open_cf_opts_secondary(path, Some(&p), global_db_options_override, &opt_cfs),
-                        None    => typed_store::rocks::open_cf_opts(path, global_db_options_override, &opt_cfs)
+                        None    => typed_store::rocks::open_cf_opts_transaction_db(path, global_db_options_override, &opt_cfs)
                     };
                     res
                 }.expect("Cannot open DB.");
@@ -288,8 +288,7 @@ pub fn derive_dbmap_utils(input: TokenStream) -> TokenStream {
 
             /// This gives info about memory usage and returns a tuple of total table memory usage and cache memory usage
             fn get_memory_usage(&self) -> Result<(u64, u64), typed_store::rocks::TypedStoreError> {
-                let stats = rocksdb::perf::get_memory_usage_stats(Some(&[&self.#first_field_name.rocksdb]), None)
-                    .map_err(|e| typed_store::rocks::TypedStoreError::RocksDBError(e.to_string()))?;
+                let stats = self.#first_field_name.rocksdb.get_memory_usage_stats()?;
                 Ok((stats.mem_table_total, stats.cache_total))
             }
         }

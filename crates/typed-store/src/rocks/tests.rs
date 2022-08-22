@@ -373,9 +373,18 @@ fn test_delete_batch() {
 
 #[test]
 fn test_delete_range() {
-    let db: DBMap<i32, String> =
-        DBMap::open(temp_dir(), None, None).expect("Failed to open storage");
-
+    let db: DBMap<i32, String> = {
+        let cf_key = rocksdb::DEFAULT_COLUMN_FAMILY_NAME;
+        let cfs = vec![cf_key];
+        let options = default_rocksdb_options();
+        let column_descriptors: Vec<_> = cfs.iter().map(|name| (*name, &options)).collect();
+        let rocksdb = open_cf_opts(temp_dir(), None, &column_descriptors).unwrap();
+        DBMap {
+            rocksdb,
+            _phantom: PhantomData,
+            cf: cf_key.to_string(),
+        }
+    };
     // Note that the last element is (100, "100".to_owned()) here
     let keys_vals = (0..101).map(|i| (i, i.to_string()));
     let insert_batch = db
@@ -539,4 +548,104 @@ async fn open_as_secondary_test() {
 
     // New value should be present
     assert_eq!(secondary_db.get(&0).unwrap(), Some("10".to_string()));
+}
+
+#[tokio::test]
+async fn test_optimistic_transaction() {
+    // Init a DB
+    let rocks = open_cf(temp_dir(), None, &["First_CF", "Second_CF"]).unwrap();
+
+    let db_cf_1 =
+        DBMap::<i32, String>::reopen(&rocks, Some("First_CF")).expect("Failed to open storage");
+    let db_cf_2 =
+        DBMap::<i32, String>::reopen(&rocks, Some("Second_CF")).expect("Failed to open storage");
+
+    // Insert outside the transaction
+    assert!(db_cf_1.insert(&123456789, &"123456789".to_string()).is_ok());
+    assert!(db_cf_2.insert(&123456789, &"123456789".to_string()).is_ok());
+    assert_eq!(
+        db_cf_1.get(&123456789).unwrap(),
+        Some("123456789".to_string())
+    );
+    assert_eq!(
+        db_cf_2.get(&123456789).unwrap(),
+        Some("123456789".to_string())
+    );
+    {
+        let txn1 = db_cf_1.optimistic_transaction().unwrap();
+        assert!(txn1
+            .insert(&db_cf_1, &123456789, &"55555".to_string())
+            .is_ok());
+
+        // get outside of transaction
+        assert_eq!(
+            db_cf_1.get(&123456789).unwrap(),
+            Some("123456789".to_string())
+        );
+
+        // get inside of transaction
+        assert_eq!(
+            txn1.get(&db_cf_1, &123456789).unwrap(),
+            Some("55555".to_string())
+        );
+
+        // modify same key in another transaction
+        let txn2 = db_cf_1.optimistic_transaction().unwrap();
+        assert!(txn2
+            .insert(&db_cf_1, &123456789, &"66666".to_string())
+            .is_ok());
+        assert!(txn2.commit().is_ok());
+
+        // txn1 should fail with RocksDBError
+        let err = txn1.commit().unwrap_err();
+        assert!(matches!(err, TypedStoreError::RocksDBError { .. }));
+    }
+
+    {
+        // Insert outside the transaction
+        assert!(db_cf_1.insert(&123456789, &"123456789".to_string()).is_ok());
+        assert!(db_cf_2.insert(&123456789, &"123456789".to_string()).is_ok());
+
+        let txn1 = db_cf_1.optimistic_transaction().unwrap();
+
+        assert!(txn1
+            .insert(&db_cf_1, &123456789, &"55555".to_string())
+            .is_ok());
+        assert!(txn1
+            .insert(&db_cf_2, &123456789, &"66666".to_string())
+            .is_ok());
+        // get inside of transaction
+        assert_eq!(
+            txn1.get(&db_cf_1, &123456789).unwrap(),
+            Some("55555".to_string())
+        );
+        assert_eq!(
+            txn1.get(&db_cf_2, &123456789).unwrap(),
+            Some("66666".to_string())
+        );
+        assert!(txn1.commit().is_ok());
+        // get outside the transaction
+        assert_eq!(db_cf_1.get(&123456789).unwrap(), Some("55555".to_string()));
+        assert_eq!(db_cf_2.get(&123456789).unwrap(), Some("66666".to_string()));
+    }
+
+    {
+        let txn1 = db_cf_1.optimistic_transaction().unwrap();
+        let keys_vals: Vec<_> = (0..101).map(|i| (i, i.to_string())).collect();
+
+        txn1.multi_insert(&db_cf_1, keys_vals.clone())
+            .expect("Failed to multi-insert");
+
+        // tx is not committed yet, no values should exist for keys
+        for (k, _v) in keys_vals.iter() {
+            let val = db_cf_1.get(k).expect("Failed to get inserted key");
+            assert_eq!(None, val);
+        }
+
+        assert!(txn1.commit().is_ok());
+        for (k, v) in keys_vals.iter() {
+            let val = db_cf_1.get(k).expect("Failed to get inserted key");
+            assert_eq!(Some(v), val.as_ref());
+        }
+    }
 }

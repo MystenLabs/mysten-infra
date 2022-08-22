@@ -4,19 +4,17 @@ use std::marker::PhantomData;
 
 use bincode::Options;
 
-use super::{be_fix_int_ser, errors::TypedStoreError};
+use super::{be_fix_int_ser, errors::TypedStoreError, RocksDBIter};
 use serde::{de::DeserializeOwned, Serialize};
-
-use super::DBRawIteratorMultiThreaded;
 
 /// An iterator over all key-value pairs in a data map.
 pub struct Iter<'a, K, V> {
-    db_iter: DBRawIteratorMultiThreaded<'a>,
+    db_iter: RocksDBIter<'a>,
     _phantom: PhantomData<(K, V)>,
 }
 
 impl<'a, K: DeserializeOwned, V: DeserializeOwned> Iter<'a, K, V> {
-    pub(super) fn new(db_iter: DBRawIteratorMultiThreaded<'a>) -> Self {
+    pub(super) fn new(db_iter: RocksDBIter<'a>) -> Self {
         Self {
             db_iter,
             _phantom: PhantomData,

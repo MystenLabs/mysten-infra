@@ -19,6 +19,8 @@ pub enum TypedStoreError {
     UnregisteredColumn(String),
     #[error("a batch operation can't operate across databases")]
     CrossDBBatch,
+    #[error("database is not opened for transaction support")]
+    TransactionUnsupportedError,
 }
 
 #[derive(Serialize, Deserialize, Clone, Eq, PartialEq, Hash, Debug, Error)]
