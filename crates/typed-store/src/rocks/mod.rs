@@ -12,7 +12,7 @@ use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, WriteBatc
 use serde::{de::DeserializeOwned, Serialize};
 use std::{borrow::Borrow, collections::BTreeMap, env, marker::PhantomData, path::Path, sync::Arc};
 use tap::TapFallible;
-use tracing::{debug, info, instrument};
+use tracing::{debug, instrument};
 
 use self::{iter::Iter, keys::Keys, values::Values};
 pub use errors::TypedStoreError;
@@ -444,7 +444,7 @@ fn read_size_from_env(var_name: &str) -> Option<usize> {
         .ok()?
         .parse::<usize>()
         .tap_err(|e| {
-            info!(
+            debug!(
                 "Env var {} does not contain valid usize integer: {}",
                 var_name, e
             )
