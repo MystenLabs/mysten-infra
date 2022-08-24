@@ -34,12 +34,14 @@ use tracing_subscriber::{
 
 use crossterm::tty::IsTty;
 
+pub mod span_latency_prom;
+
 /// Alias for a type-erased error type.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// Configuration for different logging/tracing options
 /// ===
-/// - json_log_output: Output JSON logs to stdout only.  No other options will work.
+/// - json_log_output: Output JSON logs to stdout only.
 /// - log_file: If defined, write output to a file starting with this name, ex app.log
 /// - log_level: error/warn/info/debug/trace, defaults to info
 /// - service_name:
@@ -49,8 +51,9 @@ pub struct TelemetryConfig {
     pub service_name: String,
 
     pub enable_tracing: bool,
+    /// Enables Tokio Console debugging on port 6669
     pub tokio_console: bool,
-    /// Output JSON logs.  Tracing and Tokio Console are not available if this is enabled.
+    /// Output JSON logs.
     pub json_log_output: bool,
     /// Write chrome trace output, which can be loaded from chrome://tracing
     pub chrome_trace_output: bool,
