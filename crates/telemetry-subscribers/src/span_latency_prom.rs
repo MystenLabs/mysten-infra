@@ -3,6 +3,8 @@
 
 //! This is a module that records Tokio-tracing [span](https://docs.rs/tracing/latest/tracing/span/index.html)
 //! latencies into Prometheus histograms directly.
+//! The name of the Prometheus histogram is "tracing_span_latencies[_sum/count/bucket]"
+//!
 //! There is also the tracing-timing crate, from which this differs significantly:
 //! - tracing-timing records latencies between events (logs).  We just want to record the latencies of spans.
 //! - tracing-timing does not output to Prometheus, and extracting data from its histograms takes extra CPU
@@ -20,6 +22,7 @@ pub struct PrometheusSpanLatencyLayer {
     span_latencies: prometheus::HistogramVec,
 }
 
+#[derive(Debug)]
 pub enum PrometheusSpanError {
     /// num_buckets must be positive >= 1
     ZeroOrNegativeNumBuckets,

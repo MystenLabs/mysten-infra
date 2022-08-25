@@ -17,6 +17,7 @@
 //! - `json` - Bunyan formatter - JSON log output, optional
 //! - `tokio-console` - [Tokio-console](https://github.com/tokio-rs/console) subscriber, optional
 
+use span_latency_prom::PrometheusSpanLatencyLayer;
 use std::{
     env,
     io::{stderr, Write},
@@ -46,7 +47,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// - log_level: error/warn/info/debug/trace, defaults to info
 /// - service_name:
 #[derive(Default, Clone, Debug)]
-pub struct TelemetryConfig {
+pub struct TelemetryConfig<'reg> {
     /// The name of the service for Jaeger and Bunyan
     pub service_name: String,
 
@@ -65,6 +66,8 @@ pub struct TelemetryConfig {
     pub panic_hook: bool,
     /// Crash on panic
     pub crash_on_panic: bool,
+    /// Optional Prometheus registry - if present, all enabled span latencies are measured
+    pub prom_registry: Option<&'reg prometheus::Registry>,
 }
 
 #[must_use]
@@ -142,7 +145,7 @@ fn set_panic_hook(crash_on_panic: bool) {
     }));
 }
 
-impl TelemetryConfig {
+impl<'reg> TelemetryConfig<'reg> {
     pub fn new(service_name: &str) -> Self {
         Self {
             service_name: service_name.to_owned(),
@@ -154,6 +157,7 @@ impl TelemetryConfig {
             log_string: None,
             panic_hook: true,
             crash_on_panic: false,
+            prom_registry: None,
         }
     }
 
@@ -164,6 +168,11 @@ impl TelemetryConfig {
 
     pub fn with_log_file(mut self, filename: &str) -> Self {
         self.log_file = Some(filename.to_owned());
+        self
+    }
+
+    pub fn with_prom_registry(mut self, registry: &'reg prometheus::Registry) -> Self {
+        self.prom_registry = Some(registry);
         self
     }
 
@@ -221,6 +230,12 @@ impl TelemetryConfig {
         } else {
             None
         };
+
+        if let Some(registry) = config.prom_registry {
+            let span_lat_layer = PrometheusSpanLatencyLayer::try_new(registry, 15)
+                .expect("Could not initialize span latency layer");
+            layers.push(span_lat_layer.boxed());
+        }
 
         #[cfg(feature = "jaeger")]
         if config.enable_tracing {
