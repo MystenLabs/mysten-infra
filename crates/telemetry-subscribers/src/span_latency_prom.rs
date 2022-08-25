@@ -76,6 +76,10 @@ where
         ctx: tracing_subscriber::layer::Context<S>,
     ) {
         let span = ctx.span(id).unwrap();
+        // NOTE: there are other extensions that insert timings.  For example,
+        // tracing_subscriber's with_span_events() inserts events at open and close that contain timings.
+        // However, we cannot be guaranteed that those events would be turned on.
+        // TODO: maybe add a check if something else is already inserted...
         span.extensions_mut()
             .insert(PromSpanTimestamp(Utc::now().timestamp()));
     }
