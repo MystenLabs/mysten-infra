@@ -12,6 +12,9 @@
 //!   is already using Prometheus
 //! Thus this is a much smaller and more focused module.
 //!
+//! ## Making spans visible
+//! This module can only record latencies for spans that get created.  By default, this is controlled by
+//! env_filter and logging levels.
 
 use chrono::offset::Utc;
 use prometheus::{exponential_buckets, register_histogram_vec_with_registry, Registry};
