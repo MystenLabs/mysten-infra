@@ -100,3 +100,17 @@ where
             .observe(elapsed_ns as f64);
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prom_span_latency_init() {
+        let registry = prometheus::Registry::new();
+
+        let res = PrometheusSpanLatencyLayer::try_new(&registry, 0);
+        assert!(matches!(res, Err(PrometheusSpanError::ZeroOrNegativeNumBuckets)));
+    }
+}

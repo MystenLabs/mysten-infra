@@ -354,8 +354,6 @@ mod tests {
         assert_eq!(labels[0].get_value(), "yo span yo");
 
         panic!("This should cause error logs to be printed out!");
-
-        // Now, latencies from the span should be visible in the registry
     }
 
     /*
