@@ -101,7 +101,6 @@ where
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,6 +110,9 @@ mod tests {
         let registry = prometheus::Registry::new();
 
         let res = PrometheusSpanLatencyLayer::try_new(&registry, 0);
-        assert!(matches!(res, Err(PrometheusSpanError::ZeroOrNegativeNumBuckets)));
+        assert!(matches!(
+            res,
+            Err(PrometheusSpanError::ZeroOrNegativeNumBuckets)
+        ));
     }
 }
