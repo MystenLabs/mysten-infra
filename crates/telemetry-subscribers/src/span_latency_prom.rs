@@ -16,7 +16,8 @@
 //! This module can only record latencies for spans that get created.  By default, this is controlled by
 //! env_filter and logging levels.
 
-use chrono::offset::Utc;
+use std::time::Instant;
+
 use prometheus::{exponential_buckets, register_histogram_vec_with_registry, Registry};
 use tracing::{span, Subscriber};
 
@@ -51,8 +52,8 @@ impl PrometheusSpanLatencyLayer {
         }
 
         // Histogram for span latencies must accommodate a wide range of possible latencies, so
-        // don't use the default Prometheus buckets
-        // The latencies are in nanoseconds
+        // don't use the default Prometheus buckets.  Latencies in NS.  Calculate the multiplier
+        // to go from LOWEST to TOP in num_bucket steps, step n+1 = step n * factor.
         let factor = (TOP_LATENCY_IN_NS / LOWEST_LATENCY_IN_NS).powf(1.0 / (num_buckets as f64));
         let buckets = exponential_buckets(LOWEST_LATENCY_IN_NS, factor, num_buckets)?;
         let span_latencies = register_histogram_vec_with_registry!(
@@ -66,7 +67,7 @@ impl PrometheusSpanLatencyLayer {
     }
 }
 
-struct PromSpanTimestamp(i64);
+struct PromSpanTimestamp(Instant);
 
 impl<S> tracing_subscriber::Layer<S> for PrometheusSpanLatencyLayer
 where
@@ -82,9 +83,8 @@ where
         // NOTE: there are other extensions that insert timings.  For example,
         // tracing_subscriber's with_span_events() inserts events at open and close that contain timings.
         // However, we cannot be guaranteed that those events would be turned on.
-        // TODO: maybe add a check if something else is already inserted...
         span.extensions_mut()
-            .insert(PromSpanTimestamp(Utc::now().timestamp()));
+            .insert(PromSpanTimestamp(Instant::now()));
     }
 
     fn on_close(&self, id: span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
@@ -94,7 +94,7 @@ where
             .get::<PromSpanTimestamp>()
             .expect("Could not find saved timestamp on span")
             .0;
-        let elapsed_ns = Utc::now().timestamp() - start_time;
+        let elapsed_ns = start_time.elapsed().as_nanos() as u64;
         self.span_latencies
             .with_label_values(&[span.name()])
             .observe(elapsed_ns as f64);
