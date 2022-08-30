@@ -47,7 +47,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// - log_level: error/warn/info/debug/trace, defaults to info
 /// - service_name:
 #[derive(Default, Clone, Debug)]
-pub struct TelemetryConfig<'reg> {
+pub struct TelemetryConfig {
     /// The name of the service for Jaeger and Bunyan
     pub service_name: String,
 
@@ -67,7 +67,7 @@ pub struct TelemetryConfig<'reg> {
     /// Crash on panic
     pub crash_on_panic: bool,
     /// Optional Prometheus registry - if present, all enabled span latencies are measured
-    pub prom_registry: Option<&'reg prometheus::Registry>,
+    pub prom_registry: Option<prometheus::Registry>,
 }
 
 #[must_use]
@@ -145,7 +145,7 @@ fn set_panic_hook(crash_on_panic: bool) {
     }));
 }
 
-impl<'reg> TelemetryConfig<'reg> {
+impl TelemetryConfig {
     pub fn new(service_name: &str) -> Self {
         Self {
             service_name: service_name.to_owned(),
@@ -171,8 +171,8 @@ impl<'reg> TelemetryConfig<'reg> {
         self
     }
 
-    pub fn with_prom_registry(mut self, registry: &'reg prometheus::Registry) -> Self {
-        self.prom_registry = Some(registry);
+    pub fn with_prom_registry(mut self, registry: &prometheus::Registry) -> Self {
+        self.prom_registry = Some(registry.clone());
         self
     }
 
@@ -232,7 +232,7 @@ impl<'reg> TelemetryConfig<'reg> {
         };
 
         if let Some(registry) = config.prom_registry {
-            let span_lat_layer = PrometheusSpanLatencyLayer::try_new(registry, 15)
+            let span_lat_layer = PrometheusSpanLatencyLayer::try_new(&registry, 15)
                 .expect("Could not initialize span latency layer");
             layers.push(span_lat_layer.boxed());
         }
