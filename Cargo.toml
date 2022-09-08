@@ -6,6 +6,7 @@ members = [
     "crates/mysten-util-mem-derive",
     "crates/name-variant",
     "crates/rccheck",
+    "crates/serde-lib",
     "crates/telemetry-subscribers",
     "crates/typed-store",
     "crates/typed-store-derive",
