@@ -15,6 +15,10 @@ use anyhow::Result;
 use prometheus::core;
 use prometheus::proto;
 
+/// A Prometheus metric whose value is computed at collection time by the provided closure.
+///
+/// WARNING: The provided closure must be fast (~milliseconds or faster), since it blocks
+/// metric collection.
 #[derive(Debug)]
 pub struct ClosureMetric<F> {
     desc: core::Desc,
