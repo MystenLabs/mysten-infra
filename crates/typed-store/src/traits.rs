@@ -60,7 +60,7 @@ where
     /// Returns an iterator over each value in the map.
     fn values(&'a self) -> Self::Values;
 
-    /// Returns a vector of values corresponding to the keys provided.
+    /// Returns a vector of values corresponding to the keys provided, non-atomically.
     fn multi_get<J>(&self, keys: impl IntoIterator<Item = J>) -> Result<Vec<Option<V>>, Self::Error>
     where
         J: Borrow<K>,
@@ -68,7 +68,7 @@ where
         keys.into_iter().map(|key| self.get(key.borrow())).collect()
     }
 
-    /// Inserts key-value pairs.
+    /// Inserts key-value pairs, non-atomically.
     fn multi_insert<J, U>(
         &self,
         key_val_pairs: impl IntoIterator<Item = (J, U)>,
@@ -82,7 +82,7 @@ where
             .try_for_each(|(key, value)| self.insert(key.borrow(), value.borrow()))
     }
 
-    /// Removes keys.
+    /// Removes keys, non-atomically.
     fn multi_remove<J>(&self, keys: impl IntoIterator<Item = J>) -> Result<(), Self::Error>
     where
         J: Borrow<K>,
