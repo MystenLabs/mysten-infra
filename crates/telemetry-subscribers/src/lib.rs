@@ -207,11 +207,14 @@ impl TelemetryConfig {
     pub fn init(self) -> (TelemetryGuards, FilterHandle) {
         let config = self;
 
-        // Setup an EnvFilter which will filter all downstream layers
+        // Setup an EnvFilter for filtering logging output layers.
+        // NOTE: we don't want to use this to filter all layers.  That causes problems for layers with
+        // different filtering needs, including tokio-console/console-subscriber, and it also doesn't
+        // fit with the span creation needs for distributed tracing and other span-based tools.
         let log_level = config.log_string.unwrap_or_else(|| "info".into());
         let env_filter =
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
-        let (filter, reload_handle) = reload::Layer::new(env_filter);
+        let (log_filter, reload_handle) = reload::Layer::new(env_filter);
         let filter_handle = FilterHandle(reload_handle);
 
         let mut layers = Vec::new();
@@ -263,7 +266,10 @@ impl TelemetryConfig {
             // See https://www.lpalmieri.com/posts/2020-09-27-zero-to-production-4-are-we-observable-yet/#5-7-tracing-bunyan-formatter
             // Also Bunyan layer addes JSON logging for tracing spans with duration information
             let json_layer = JsonStorageLayer
-                .and_then(BunyanFormattingLayer::new(config.service_name, nb_output))
+                .and_then(
+                    BunyanFormattingLayer::new(config.service_name, nb_output)
+                        .with_filter(log_filter),
+                )
                 .boxed();
             layers.push(json_layer);
         } else {
@@ -272,14 +278,12 @@ impl TelemetryConfig {
                 .with_ansi(config.log_file.is_none() && stderr().is_tty())
                 .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
                 .with_writer(nb_output)
+                .with_filter(log_filter)
                 .boxed();
             layers.push(fmt_layer);
         }
 
-        tracing_subscriber::registry()
-            .with(filter)
-            .with(layers)
-            .init();
+        tracing_subscriber::registry().with(layers).init();
 
         if config.panic_hook {
             set_panic_hook(config.crash_on_panic);
