@@ -1,25 +1,35 @@
 # Telemetry library
 
 This is a library for common telemetry functionality, especially subscribers for [Tokio tracing](https://github.com/tokio-rs/tracing)
-libraries.  The subscribers enable writing trace data to Jaeger, distributed tracing,
-common logs and metrics destinations, etc.
+libraries.  Here we simply package many common subscribers, such as writing trace data to Jaeger, distributed tracing,
+common logs and metrics destinations, etc.  into a easy to configure common package.  There are also 
+some unique layers such as one to automatically create Prometheus latency histograms for spans.
+
+We also purposely separate out logging levels from span creation.  This is often needed by production apps
+as normally it is not desired to log at very high levels, but still desirable to gather sampled span data
+all the way down to TRACE level spans.
 
 Getting started is easy.  In your app:
 
 ```rust
-  let config = telemetry::TelemetryConfig {
-    service_name: "my_app".into(),
-    ..Default::default()
-  };
+  let config = telemetry::TelemetryConfig::new("my_app");
   let guard = telemetry::init(config);
 ```
 
 It is important to retain the guard until the end of the program.  Assign it in the main fn and keep it,
 for once it drops then log output will stop.
 
+There is a builder API available: just do `TelemetryConfig::new()...` Another convenient initialization method 
+is `TelemetryConfig::new().with_env()` to populate the config from environment vars.
+
 You can also run the example and see output in ANSI color:
 
     cargo run --example easy-init
+
+## Features
+- `jaeger` - this feature is enabled by default as it enables jaeger tracing
+- `json` - Bunyan formatter - JSON log output, optional
+- `tokio-console` - [Tokio-console](https://github.com/tokio-rs/console) subscriber, optional
 
 ### Stdout vs file output
 
@@ -51,11 +61,31 @@ out the Jaeger dependencies, you can turn off the default-features in your depen
 
     telemetry = { url = "...", default-features = false }
 
+### Automatic Prometheus span latencies
+
+Included in this library is a tracing-subscriber layer named `PrometheusSpanLatencyLayer`.  It will create 
+a Prometheus histogram to track latencies for every span in your app, which is super convenient for tracking
+span performance in production apps.
+
+Enabling this layer can only be done programmatically, by passing in a Prometheus registry to `TelemetryConfig`.
+
 ### Live async inspection / Tokio Console
 
 [Tokio-console](https://github.com/tokio-rs/console) is an awesome CLI tool designed to analyze and help debug Rust apps using Tokio, in real time!  It relies on a special subscriber.
 
 1. Build your app using a special flag: `RUSTFLAGS="--cfg tokio_unstable" cargo build`
 2. Enable the `tokio-console` feature for this crate.
-2. Set the `tokio_console` config setting when running your app
+2. Set the `tokio_console` config setting when running your app (or set TOKIO_CONSOLE env var if using config `with_env()` method)
 3. Clone the console repo and `cargo run` to launch the console
+
+NOTE: setting tokio TRACE logs is NOT necessary.  It says that in the docs but there's no need to change Tokio logging levels at all.  The console subscriber has a special filter enabled taking care of that.
+
+By default, Tokio console listens on port 6669.  To change this setting as well as other setting such as
+the retention policy, please see the [configuration](https://docs.rs/console-subscriber/latest/console_subscriber/struct.Builder.html#configuration) guide.
+
+### Custom panic hook
+
+This library installs a custom panic hook which records a log (event) at ERROR level using the tracing
+crate.  This allows span information from the panic to be properly recorded as well.
+
+To exit the process on panic, set the `CRASH_ON_PANIC` environment variable.
