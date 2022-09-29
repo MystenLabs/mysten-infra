@@ -2,7 +2,7 @@
 
 This is a library for common telemetry functionality, especially subscribers for [Tokio tracing](https://github.com/tokio-rs/tracing)
 libraries.  Here we simply package many common subscribers, such as writing trace data to Jaeger, distributed tracing,
-common logs and metrics destinations, etc.  into a easy to configure common package.  There are also 
+common logs and metrics destinations, etc.  into a easy to configure common package.  There are also
 some unique layers such as one to automatically create Prometheus latency histograms for spans.
 
 We also purposely separate out logging levels from span creation.  This is often needed by production apps
@@ -19,7 +19,7 @@ Getting started is easy.  In your app:
 It is important to retain the guard until the end of the program.  Assign it in the main fn and keep it,
 for once it drops then log output will stop.
 
-There is a builder API available: just do `TelemetryConfig::new()...` Another convenient initialization method 
+There is a builder API available: just do `TelemetryConfig::new()...` Another convenient initialization method
 is `TelemetryConfig::new().with_env()` to populate the config from environment vars.
 
 You can also run the example and see output in ANSI color:
@@ -63,7 +63,7 @@ out the Jaeger dependencies, you can turn off the default-features in your depen
 
 ### Automatic Prometheus span latencies
 
-Included in this library is a tracing-subscriber layer named `PrometheusSpanLatencyLayer`.  It will create 
+Included in this library is a tracing-subscriber layer named `PrometheusSpanLatencyLayer`.  It will create
 a Prometheus histogram to track latencies for every span in your app, which is super convenient for tracking
 span performance in production apps.
 
