@@ -55,7 +55,7 @@
 //! To see nested spans visualized with [Jaeger](https://www.jaegertracing.io), do the following:
 //!
 //! 1. Run this to get a local Jaeger container: `docker run -d -p6831:6831/udp -p6832:6832/udp -p16686:16686 jaegertracing/all-in-one:latest`
-//! 2. Set `enable_tracing` config setting to true
+//! 2. Set `enable_jaeger` config setting to true or set `TOKIO_JAEGER` env var
 //! 3. Run your app
 //! 4. Browse to `http://localhost:16686/` and select the service you configured using `service_name`
 //!
@@ -141,7 +141,7 @@ pub struct TelemetryConfig {
     /// The name of the service for Jaeger and Bunyan
     pub service_name: String,
 
-    pub enable_tracing: bool,
+    pub enable_jaeger: bool,
     /// Enables Tokio Console debugging on port 6669
     pub tokio_console: bool,
     /// Output JSON logs.
@@ -242,7 +242,7 @@ impl TelemetryConfig {
     pub fn new(service_name: &str) -> Self {
         Self {
             service_name: service_name.to_owned(),
-            enable_tracing: false,
+            enable_jaeger: false,
             tokio_console: false,
             json_log_output: false,
             chrome_trace_output: false,
@@ -280,15 +280,15 @@ impl TelemetryConfig {
             self.crash_on_panic = true
         }
 
-        if env::var("TS_TRACING").is_ok() {
-            self.enable_tracing = true
+        if env::var("TOKIO_JAEGER").is_ok() {
+            self.enable_jaeger = true
         }
 
-        if env::var("TS_TRACING_CHROME").is_ok() {
+        if env::var("TOKIO_CHROME").is_ok() {
             self.chrome_trace_output = true;
         }
 
-        if env::var("TS_TRACING_JSON").is_ok() {
+        if env::var("ENABLE_JSON_LOGS").is_ok() {
             self.json_log_output = true;
         }
 
@@ -296,12 +296,12 @@ impl TelemetryConfig {
             self.tokio_console = true;
         }
 
-        if let Ok(span_level) = env::var("TS_SPAN_LEVEL") {
+        if let Ok(span_level) = env::var("TOKIO_SPAN_LEVEL") {
             self.span_level =
-                Some(Level::from_str(&span_level).expect("Cannot parse TS_SPAN_LEVEL"));
+                Some(Level::from_str(&span_level).expect("Cannot parse TOKIO_SPAN_LEVEL"));
         }
 
-        if let Ok(filepath) = env::var("TS_TRACING_FILE") {
+        if let Ok(filepath) = env::var("RUST_LOG_FILE") {
             self.log_file = Some(filepath);
         }
 
@@ -355,7 +355,7 @@ impl TelemetryConfig {
         }
 
         #[cfg(feature = "jaeger")]
-        if config.enable_tracing {
+        if config.enable_jaeger {
             // Install a tracer to send traces to Jaeger.  Batching for better performance.
             let tracer = opentelemetry_jaeger::new_agent_pipeline()
                 .with_service_name(&config.service_name)
