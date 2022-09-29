@@ -280,15 +280,15 @@ impl TelemetryConfig {
             self.crash_on_panic = true
         }
 
-        if env::var("MYSTEN_TRACING").is_ok() {
+        if env::var("TS_TRACING").is_ok() {
             self.enable_tracing = true
         }
 
-        if env::var("MYSTEN_TRACING_CHROME").is_ok() {
+        if env::var("TS_TRACING_CHROME").is_ok() {
             self.chrome_trace_output = true;
         }
 
-        if env::var("MYSTEN_TRACING_JSON").is_ok() {
+        if env::var("TS_TRACING_JSON").is_ok() {
             self.json_log_output = true;
         }
 
@@ -301,7 +301,7 @@ impl TelemetryConfig {
                 Some(Level::from_str(&span_level).expect("Cannot parse TS_SPAN_LEVEL"));
         }
 
-        if let Ok(filepath) = env::var("MYSTEN_TRACING_FILE") {
+        if let Ok(filepath) = env::var("TS_TRACING_FILE") {
             self.log_file = Some(filepath);
         }
 
