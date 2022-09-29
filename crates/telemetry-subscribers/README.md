@@ -69,6 +69,13 @@ span performance in production apps.
 
 Enabling this layer can only be done programmatically, by passing in a Prometheus registry to `TelemetryConfig`.
 
+### Span levels vs log levels
+
+What spans are included for Jaeger output, automatic span latencies, etc.?  These are controlled by
+the `span_level` config attribute, or the `TS_SPAN_LEVEL` environment variable.  Note that this is
+separate from `RUST_LOG`, so that you can separately control the logging verbosity from the level of
+spans that are to be recorded and traced.
+
 ### Live async inspection / Tokio Console
 
 [Tokio-console](https://github.com/tokio-rs/console) is an awesome CLI tool designed to analyze and help debug Rust apps using Tokio, in real time!  It relies on a special subscriber.

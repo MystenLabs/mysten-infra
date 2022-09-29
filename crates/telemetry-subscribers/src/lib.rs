@@ -76,6 +76,13 @@
 //!
 //! Enabling this layer can only be done programmatically, by passing in a Prometheus registry to `TelemetryConfig`.
 //!
+//! ### Span levels vs log levels
+//!
+//! What spans are included for Jaeger output, automatic span latencies, etc.?  These are controlled by
+//! the `span_level` config attribute, or the `TS_SPAN_LEVEL` environment variable.  Note that this is
+//! separate from `RUST_LOG`, so that you can separately control the logging verbosity from the level of
+//! spans that are to be recorded and traced.
+//!
 //! ### Live async inspection / Tokio Console
 //!
 //! [Tokio-console](https://github.com/tokio-rs/console) is an awesome CLI tool designed to analyze and help debug Rust apps using Tokio, in real time!  It relies on a special subscriber.
@@ -101,11 +108,14 @@ use span_latency_prom::PrometheusSpanLatencyLayer;
 use std::{
     env,
     io::{stderr, Write},
+    str::FromStr,
 };
 use tracing::metadata::LevelFilter;
+use tracing::Level;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
 use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 use tracing_subscriber::{
+    filter,
     fmt::{self, format::FmtSpan},
     layer::SubscriberExt,
     reload,
@@ -142,6 +152,9 @@ pub struct TelemetryConfig {
     pub log_file: Option<String>,
     /// Log level to set, defaults to info
     pub log_string: Option<String>,
+    /// Span level - what level of spans should be created.  Note this is not same as logging level
+    /// If set to None, then defaults to INFO
+    pub span_level: Option<Level>,
     /// Set a panic hook
     pub panic_hook: bool,
     /// Crash on panic
@@ -235,6 +248,7 @@ impl TelemetryConfig {
             chrome_trace_output: false,
             log_file: None,
             log_string: None,
+            span_level: None,
             panic_hook: true,
             crash_on_panic: false,
             prom_registry: None,
@@ -243,6 +257,11 @@ impl TelemetryConfig {
 
     pub fn with_log_level(mut self, log_string: &str) -> Self {
         self.log_string = Some(log_string.to_owned());
+        self
+    }
+
+    pub fn with_span_level(mut self, span_level: Level) -> Self {
+        self.span_level = Some(span_level);
         self
     }
 
@@ -277,6 +296,11 @@ impl TelemetryConfig {
             self.tokio_console = true;
         }
 
+        if let Ok(span_level) = env::var("TS_SPAN_LEVEL") {
+            self.span_level =
+                Some(Level::from_str(&span_level).expect("Cannot parse TS_SPAN_LEVEL"));
+        }
+
         if let Ok(filepath) = env::var("MYSTEN_TRACING_FILE") {
             self.log_file = Some(filepath);
         }
@@ -296,6 +320,14 @@ impl TelemetryConfig {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
         let (log_filter, reload_handle) = reload::Layer::new(env_filter);
         let filter_handle = FilterHandle(reload_handle);
+
+        // Separate span level filter.
+        // This is a dumb filter for now - allows all spans that are below a given level.
+        // TODO: implement a sampling filter
+        let span_level = config.span_level.unwrap_or(Level::INFO);
+        let span_filter = filter::filter_fn(move |metadata| {
+            metadata.is_span() && *metadata.level() <= span_level
+        });
 
         let mut layers = Vec::new();
 
@@ -319,7 +351,7 @@ impl TelemetryConfig {
         if let Some(registry) = config.prom_registry {
             let span_lat_layer = PrometheusSpanLatencyLayer::try_new(&registry, 15)
                 .expect("Could not initialize span latency layer");
-            layers.push(span_lat_layer.boxed());
+            layers.push(span_lat_layer.with_filter(span_filter.clone()).boxed());
         }
 
         #[cfg(feature = "jaeger")]
@@ -340,7 +372,7 @@ impl TelemetryConfig {
                 opentelemetry::sdk::propagation::TraceContextPropagator::new(),
             );
 
-            layers.push(telemetry.boxed());
+            layers.push(telemetry.with_filter(span_filter.clone()).boxed());
         }
 
         let (nb_output, worker_guard) = get_output(config.log_file.clone());
@@ -411,20 +443,32 @@ mod tests {
     use super::*;
     use prometheus::proto::MetricType;
     use std::time::Duration;
-    use tracing::{debug, info, info_span, warn};
+    use tracing::{debug, debug_span, info, trace_span, warn};
 
     #[test]
     #[should_panic]
     fn test_telemetry_init() {
         let registry = prometheus::Registry::new();
-        let config = TelemetryConfig::new("my_app").with_prom_registry(&registry);
+        // Default logging level is INFO, but here we set the span level to DEBUG.  TRACE spans should be ignored.
+        let config = TelemetryConfig::new("my_app")
+            .with_span_level(Level::DEBUG)
+            .with_prom_registry(&registry);
         let _guard = config.init();
 
         info!(a = 1, "This will be INFO.");
-        info_span!("yo span yo").in_scope(|| {
+        // Spans are debug level or below, so they won't be printed out either.  However latencies
+        // should be recorded for at least one span
+        debug_span!("yo span yo").in_scope(|| {
+            // This debug log will not print out, log level set to INFO by default
             debug!(a = 2, "This will be DEBUG.");
             std::thread::sleep(Duration::from_millis(100));
             warn!(a = 3, "This will be WARNING.");
+        });
+
+        // This span won't be enabled
+        trace_span!("this span should not be created").in_scope(|| {
+            info!("This log appears, but surrounding span is not created");
+            std::thread::sleep(Duration::from_millis(100));
         });
 
         let metrics = registry.gather();
