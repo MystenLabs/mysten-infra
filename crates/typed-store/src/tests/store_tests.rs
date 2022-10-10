@@ -36,6 +36,28 @@ async fn read_write_value() {
 }
 
 #[tokio::test]
+async fn read_blocking_write_value() {
+    // Create new store.
+    let db = rocks::DBMap::<Vec<u8>, Vec<u8>>::open(temp_dir(), None, None).unwrap();
+    let store = Store::new(db);
+
+    // Write value to the store.
+    let key = vec![0u8, 1u8, 2u8, 3u8];
+    let value = vec![4u8, 5u8, 6u8, 7u8];
+    store
+        .blocking_write(key.clone(), value.clone())
+        .await
+        .unwrap();
+
+    // Read value.
+    let result = store.read(key).await;
+    assert!(result.is_ok());
+    let read_value = result.unwrap();
+    assert!(read_value.is_some());
+    assert_eq!(read_value.unwrap(), value);
+}
+
+#[tokio::test]
 async fn read_raw_write_value() {
     // Create new store.
     let db = rocks::DBMap::<Vec<u8>, String>::open(temp_dir(), None, None).unwrap();
