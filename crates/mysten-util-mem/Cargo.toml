@@ -14,7 +14,7 @@ cfg-if = "1.0.0"
 hashbrown = { version = "0.12", optional = true }
 mysten-util-mem-derive = { path = "../mysten-util-mem-derive", version = "0.1" }
 impl-trait-for-tuples = "0.2.0"
-fastcrypto = { git = "https://github.com/MystenLabs/fastcrypto", rev = "a5147af9e044056b9769547d7ba96486255487c3" }
+fastcrypto = { git = "https://github.com/MystenLabs/fastcrypto", rev = "826add4587ec180d1ecc67a51d6bbc855ee3c2d6" }
 indexmap = { version = "1.9.1", features = ["serde"] }
 roaring = "0.10.0"
 ed25519-consensus = { version = "2.0.1", features = ["serde"] }
