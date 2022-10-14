@@ -165,7 +165,7 @@ where
     Key: Serialize + DeserializeOwned + Send,
     Value: Serialize + DeserializeOwned + Send,
 {
-    pub async fn write(&self, key: Key, value: Value) {
+    pub async fn async_write(&self, key: Key, value: Value) {
         if let Err(e) = self
             .channel
             .send(StoreCommand::Write(key, value, None))
@@ -175,7 +175,7 @@ where
         }
     }
 
-    pub async fn blocking_write(&self, key: Key, value: Value) -> StoreResult<()> {
+    pub async fn sync_write(&self, key: Key, value: Value) -> StoreResult<()> {
         let (sender, receiver) = oneshot::channel();
         if let Err(e) = self
             .channel
@@ -192,7 +192,7 @@ where
     /// Atomically writes all the key-value pairs in storage.
     /// If the operation is successful, then the result will be a non
     /// error empty result. Otherwise the error is returned.
-    pub async fn write_all(
+    pub async fn sync_write_all(
         &self,
         key_value_pairs: impl IntoIterator<Item = (Key, Value)>,
     ) -> StoreResult<()> {
