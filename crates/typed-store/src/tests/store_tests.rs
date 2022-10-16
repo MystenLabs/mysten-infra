@@ -40,7 +40,8 @@ async fn read_async_write_value() {
 #[tokio::test]
 async fn read_sync_write_value() {
     // Create new store.
-    let db = rocks::DBMap::<Vec<u8>, Vec<u8>>::open(temp_dir(), None, None).unwrap();
+    let db =
+        rocks::DBMap::<Vec<u8>, Vec<u8>>::open(temp_dir(), None, None, &Registry::new()).unwrap();
     let store = Store::new(db);
 
     // Write value to the store.
