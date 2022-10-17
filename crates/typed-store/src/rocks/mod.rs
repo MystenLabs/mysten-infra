@@ -12,9 +12,24 @@ use crate::{
 use bincode::Options;
 use collectable::TryExtend;
 use prometheus::Registry;
-use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, WriteBatch};
+use rocksdb::{
+    properties, AsColumnFamilyRef, ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded,
+    WriteBatch,
+};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{borrow::Borrow, collections::BTreeMap, env, marker::PhantomData, path::Path, sync::Arc};
+use std::{
+    borrow::Borrow,
+    collections::BTreeMap,
+    env,
+    marker::PhantomData,
+    path::Path,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread::{sleep, JoinHandle},
+    time::Duration,
+};
 use tap::TapFallible;
 use tracing::{debug, info, instrument};
 
@@ -89,6 +104,9 @@ macro_rules! reopen {
     };
 }
 
+const CF_METRICS_REPORT_PERIOD_MILLIS: u64 = 1000;
+const METRICS_ERROR: i64 = -1;
+
 /// An interface to a rocksDB database, keyed by a columnfamily
 #[derive(Clone, Debug)]
 pub struct DBMap<K, V> {
@@ -99,11 +117,40 @@ pub struct DBMap<K, V> {
     db_metrics: Arc<DBMetrics>,
     read_sample_interval: SamplingInterval,
     write_sample_interval: SamplingInterval,
+    _cf_metric_reporter: Arc<JoinHandle<()>>,
+    exit_signal: Arc<AtomicBool>,
 }
 
 unsafe impl<K: Send, V: Send> Send for DBMap<K, V> {}
 
 impl<K, V> DBMap<K, V> {
+    pub(crate) fn new(
+        db: Arc<rocksdb::DBWithThreadMode<MultiThreaded>>,
+        opt_cf: &str,
+        db_metrics: Arc<DBMetrics>,
+    ) -> Self {
+        let exit = Arc::new(AtomicBool::new(false));
+        let exit_cloned = exit.clone();
+        let db_cloned = db.clone();
+        let db_metrics_cloned = db_metrics.clone();
+        let cf = opt_cf.to_string();
+        let _cf_metric_reporter = Arc::new(std::thread::spawn(move || {
+            while !exit_cloned.load(Ordering::Relaxed) {
+                Self::report_metrics(&db, &cf, &db_metrics);
+                sleep(Duration::from_millis(CF_METRICS_REPORT_PERIOD_MILLIS));
+            }
+        }));
+        DBMap {
+            rocksdb: db_cloned,
+            _phantom: PhantomData,
+            cf: opt_cf.to_string(),
+            db_metrics: db_metrics_cloned,
+            read_sample_interval: SamplingInterval::default(),
+            write_sample_interval: SamplingInterval::default(),
+            _cf_metric_reporter,
+            exit_signal: exit,
+        }
+    }
     /// Opens a database from a path, with specific options and an optional column family.
     ///
     /// This database is used to perform operations on single column family, and parametrizes
@@ -118,15 +165,8 @@ impl<K, V> DBMap<K, V> {
         let cf_key = opt_cf.unwrap_or(rocksdb::DEFAULT_COLUMN_FAMILY_NAME);
         let cfs = vec![cf_key];
         let rocksdb = open_cf(path, db_options, &cfs)?;
-
-        Ok(DBMap {
-            rocksdb,
-            _phantom: PhantomData,
-            cf: cf_key.to_string(),
-            db_metrics: Arc::new(DBMetrics::new(registry)),
-            read_sample_interval: SamplingInterval::default(),
-            write_sample_interval: SamplingInterval::default(),
-        })
+        let db_metrics = Arc::new(DBMetrics::new(registry));
+        Ok(DBMap::new(rocksdb, cf_key, db_metrics))
     }
 
     /// Reopens an open database as a typed map operating under a specific column family.
@@ -163,14 +203,7 @@ impl<K, V> DBMap<K, V> {
         db.cf_handle(&cf_key)
             .ok_or_else(|| TypedStoreError::UnregisteredColumn(cf_key.clone()))?;
 
-        Ok(DBMap {
-            rocksdb: db.clone(),
-            _phantom: PhantomData,
-            cf: cf_key,
-            db_metrics: db_metrics.clone(),
-            read_sample_interval: SamplingInterval::default(),
-            write_sample_interval: SamplingInterval::default(),
-        })
+        Ok(DBMap::new(db.clone(), &cf_key, db_metrics.clone()))
     }
 
     pub fn batch(&self) -> DBBatch {
@@ -181,6 +214,160 @@ impl<K, V> DBMap<K, V> {
         self.rocksdb
             .cf_handle(&self.cf)
             .expect("Map-keying column family should have been checked at DB creation")
+    }
+
+    fn get_int_property(
+        rocksdb: &Arc<rocksdb::DBWithThreadMode<MultiThreaded>>,
+        cf: &impl AsColumnFamilyRef,
+        property_name: &'static std::ffi::CStr,
+    ) -> Result<i64, TypedStoreError> {
+        match rocksdb.property_int_value_cf(cf, property_name) {
+            Ok(Some(value)) => Ok(value.try_into().unwrap()),
+            Ok(None) => Ok(0),
+            Err(e) => Err(TypedStoreError::RocksDBError(e.into_string())),
+        }
+    }
+
+    fn report_metrics(
+        rocksdb: &Arc<rocksdb::DBWithThreadMode<MultiThreaded>>,
+        cf_name: &str,
+        db_metrics: &Arc<DBMetrics>,
+    ) {
+        let cf = rocksdb.cf_handle(cf_name).expect("Failed to get cf");
+        db_metrics
+            .cf_metrics
+            .rocksdb_total_sst_files_size
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::TOTAL_SST_FILES_SIZE)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocksdb_size_all_mem_tables
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::SIZE_ALL_MEM_TABLES)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocksdb_num_snapshots
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::NUM_SNAPSHOTS)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocksdb_oldest_snapshot_time
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::OLDEST_SNAPSHOT_TIME)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocksdb_actual_delayed_write_rate
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::ACTUAL_DELAYED_WRITE_RATE)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocksdb_is_write_stopped
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::IS_WRITE_STOPPED)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocksdb_block_cache_capacity
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::BLOCK_CACHE_CAPACITY)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocksdb_block_cache_usage
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::BLOCK_CACHE_USAGE)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocksdb_block_cache_pinned_usage
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::BLOCK_CACHE_PINNED_USAGE)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocskdb_estimate_table_readers_mem
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::ESTIMATE_TABLE_READERS_MEM)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocksdb_mem_table_flush_pending
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::MEM_TABLE_FLUSH_PENDING)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocskdb_compaction_pending
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::COMPACTION_PENDING)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocskdb_num_running_compactions
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::NUM_RUNNING_COMPACTIONS)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocksdb_num_running_flushes
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::NUM_RUNNING_FLUSHES)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocksdb_estimate_oldest_key_time
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::ESTIMATE_OLDEST_KEY_TIME)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
+            .rocskdb_background_errors
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::BACKGROUND_ERRORS)
+                    .unwrap_or(METRICS_ERROR),
+            );
+    }
+}
+
+impl<K, V> Drop for DBMap<K, V> {
+    fn drop(&mut self) {
+        self.exit_signal.store(true, Ordering::SeqCst);
     }
 }
 
@@ -272,6 +459,7 @@ impl DBBatch {
                 .unwrap_or("unknown");
             let timer = self
                 .db_metrics
+                .op_metrics
                 .rocksdb_batch_commit_latency_seconds
                 .with_label_values(&[db_name])
                 .start_timer();
@@ -283,6 +471,7 @@ impl DBBatch {
         self.rocksdb.write(self.batch)?;
         if let Some((db_name, batch_size, _timer)) = report_metrics {
             self.db_metrics
+                .op_metrics
                 .rocksdb_batch_commit_bytes
                 .with_label_values(&[db_name])
                 .observe(batch_size as f64);
@@ -377,6 +566,7 @@ where
         let report_metrics = if self.read_sample_interval.sample() {
             let timer = self
                 .db_metrics
+                .op_metrics
                 .rocksdb_get_latency_seconds
                 .with_label_values(&[&self.cf])
                 .start_timer();
@@ -388,6 +578,7 @@ where
         let res = self.rocksdb.get_pinned_cf(&self.cf(), &key_buf)?;
         if report_metrics.is_some() {
             self.db_metrics
+                .op_metrics
                 .rocksdb_get_bytes
                 .with_label_values(&[&self.cf])
                 .observe(res.as_ref().map_or(0.0, |v| v.len() as f64));
@@ -403,6 +594,7 @@ where
         let report_metrics = if self.read_sample_interval.sample() {
             let timer = self
                 .db_metrics
+                .op_metrics
                 .rocksdb_get_latency_seconds
                 .with_label_values(&[&self.cf])
                 .start_timer();
@@ -414,6 +606,7 @@ where
         let res = self.rocksdb.get_pinned_cf(&self.cf(), &key_buf)?;
         if report_metrics.is_some() {
             self.db_metrics
+                .op_metrics
                 .rocksdb_get_bytes
                 .with_label_values(&[&self.cf])
                 .observe(res.as_ref().map_or(0.0, |v| v.len() as f64));
@@ -429,6 +622,7 @@ where
         let report_metrics = if self.write_sample_interval.sample() {
             let timer = self
                 .db_metrics
+                .op_metrics
                 .rocksdb_put_latency_seconds
                 .with_label_values(&[&self.cf])
                 .start_timer();
@@ -440,6 +634,7 @@ where
         let value_buf = bincode::serialize(value)?;
         if report_metrics.is_some() {
             self.db_metrics
+                .op_metrics
                 .rocksdb_put_bytes
                 .with_label_values(&[&self.cf])
                 .observe((key_buf.len() + value_buf.len()) as f64);
@@ -453,6 +648,7 @@ where
         let report_metrics = if self.write_sample_interval.sample() {
             let timer = self
                 .db_metrics
+                .op_metrics
                 .rocksdb_delete_latency_seconds
                 .with_label_values(&[&self.cf])
                 .start_timer();
@@ -464,6 +660,7 @@ where
         self.rocksdb.delete_cf(&self.cf(), &key_buf)?;
         if report_metrics.is_some() {
             self.db_metrics
+                .op_metrics
                 .rocksdb_deletes
                 .with_label_values(&[&self.cf])
                 .inc();
@@ -521,6 +718,7 @@ where
         let report_metrics = if self.read_sample_interval.sample() {
             let timer = self
                 .db_metrics
+                .op_metrics
                 .rocksdb_multiget_latency_seconds
                 .with_label_values(&[&self.cf])
                 .start_timer();
@@ -543,6 +741,7 @@ where
         };
         if report_metrics.is_some() {
             self.db_metrics
+                .op_metrics
                 .rocksdb_multiget_bytes
                 .with_label_values(&[&self.cf])
                 .observe(results.iter().map(entry_size).sum());
