@@ -31,6 +31,7 @@ use std::{
     time::Duration,
 };
 use tap::TapFallible;
+use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
 
 use self::{iter::Iter, keys::Keys, values::Values};
@@ -117,7 +118,7 @@ pub struct DBMap<K, V> {
     db_metrics: Arc<DBMetrics>,
     read_sample_interval: SamplingInterval,
     write_sample_interval: SamplingInterval,
-    _cf_metric_reporter: Arc<JoinHandle<()>>,
+    metric_reporter: Arc<Mutex<Option<JoinHandle<()>>>>,
     exit_signal: Arc<AtomicBool>,
 }
 
@@ -134,12 +135,16 @@ impl<K, V> DBMap<K, V> {
         let db_cloned = db.clone();
         let db_metrics_cloned = db_metrics.clone();
         let cf = opt_cf.to_string();
-        let _cf_metric_reporter = Arc::new(std::thread::spawn(move || {
-            while !exit_cloned.load(Ordering::Relaxed) {
+        let metric_reporter = std::thread::spawn(move || {
+            while !exit.load(Ordering::SeqCst) {
                 Self::report_metrics(&db, &cf, &db_metrics);
                 sleep(Duration::from_millis(CF_METRICS_REPORT_PERIOD_MILLIS));
             }
-        }));
+            info!(
+                "Stopping the column family metric reporting task for DBMap: {}",
+                &cf
+            );
+        });
         DBMap {
             rocksdb: db_cloned,
             _phantom: PhantomData,
@@ -147,10 +152,25 @@ impl<K, V> DBMap<K, V> {
             db_metrics: db_metrics_cloned,
             read_sample_interval: SamplingInterval::default(),
             write_sample_interval: SamplingInterval::default(),
-            _cf_metric_reporter,
-            exit_signal: exit,
+            metric_reporter: Arc::new(Mutex::new(Some(metric_reporter))),
+            exit_signal: exit_cloned,
         }
     }
+
+    pub async fn stop(&self) -> Result<(), TypedStoreError> {
+        let mut locked = self.metric_reporter.lock().await;
+        if locked.is_none() {
+            // Already stopped
+            return Ok(());
+        }
+        self.exit_signal.store(true, Ordering::SeqCst);
+        locked
+            .take()
+            .expect("Metric runner was never started")
+            .join()
+            .map_err(|_| TypedStoreError::MetricsReporting)
+    }
+
     /// Opens a database from a path, with specific options and an optional column family.
     ///
     /// This database is used to perform operations on single column family, and parametrizes
@@ -316,6 +336,14 @@ impl<K, V> DBMap<K, V> {
             );
         db_metrics
             .cf_metrics
+            .rocksdb_estimated_num_keys
+            .with_label_values(&[cf_name])
+            .set(
+                Self::get_int_property(rocksdb, &cf, properties::ESTIMATE_NUM_KEYS)
+                    .unwrap_or(METRICS_ERROR),
+            );
+        db_metrics
+            .cf_metrics
             .rocksdb_mem_table_flush_pending
             .with_label_values(&[cf_name])
             .set(
@@ -362,12 +390,6 @@ impl<K, V> DBMap<K, V> {
                 Self::get_int_property(rocksdb, &cf, properties::BACKGROUND_ERRORS)
                     .unwrap_or(METRICS_ERROR),
             );
-    }
-}
-
-impl<K, V> Drop for DBMap<K, V> {
-    fn drop(&mut self) {
-        self.exit_signal.store(true, Ordering::SeqCst);
     }
 }
 

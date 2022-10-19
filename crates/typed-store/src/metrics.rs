@@ -75,6 +75,7 @@ pub struct ColumnFamilyMetrics {
     pub rocksdb_num_running_flushes: IntGaugeVec,
     pub rocksdb_estimate_oldest_key_time: IntGaugeVec,
     pub rocskdb_background_errors: IntGaugeVec,
+    pub rocksdb_estimated_num_keys: IntGaugeVec,
 }
 
 impl ColumnFamilyMetrics {
@@ -191,6 +192,13 @@ impl ColumnFamilyMetrics {
                 "rocksdb_estimate_oldest_key_time",
                 "Estimation of the oldest key timestamp in the DB. Only vailable
                 for FIFO compaction with compaction_options_fifo.allow_compaction = false.",
+                &["cf_name"],
+                registry,
+            )
+            .unwrap(),
+            rocksdb_estimated_num_keys: register_int_gauge_vec_with_registry!(
+                "rocksdb_estimated_num_keys",
+                "The estimated number of keys in the table",
                 &["cf_name"],
                 registry,
             )
