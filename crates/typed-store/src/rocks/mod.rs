@@ -18,21 +18,12 @@ use rocksdb::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
-    borrow::Borrow,
-    collections::BTreeMap,
-    env,
-    marker::PhantomData,
-    path::Path,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    thread::{sleep, JoinHandle},
+    borrow::Borrow, collections::BTreeMap, env, marker::PhantomData, path::Path, sync::Arc,
     time::Duration,
 };
 use tap::TapFallible;
-use tokio::sync::Mutex;
-use tracing::{debug, info, instrument};
+use tokio::sync::oneshot;
+use tracing::{debug, error, info, instrument};
 
 use self::{iter::Iter, keys::Keys, values::Values};
 pub use errors::TypedStoreError;
@@ -118,8 +109,7 @@ pub struct DBMap<K, V> {
     db_metrics: Arc<DBMetrics>,
     read_sample_interval: SamplingInterval,
     write_sample_interval: SamplingInterval,
-    metric_reporter: Arc<Mutex<Option<JoinHandle<()>>>>,
-    exit_signal: Arc<AtomicBool>,
+    _metrics_task_cancel_handle: Arc<oneshot::Sender<()>>,
 }
 
 unsafe impl<K: Send, V: Send> Send for DBMap<K, V> {}
@@ -130,20 +120,29 @@ impl<K, V> DBMap<K, V> {
         opt_cf: &str,
         db_metrics: Arc<DBMetrics>,
     ) -> Self {
-        let exit = Arc::new(AtomicBool::new(false));
-        let exit_cloned = exit.clone();
         let db_cloned = db.clone();
         let db_metrics_cloned = db_metrics.clone();
         let cf = opt_cf.to_string();
-        let metric_reporter = std::thread::spawn(move || {
-            while !exit.load(Ordering::SeqCst) {
-                Self::report_metrics(&db, &cf, &db_metrics);
-                sleep(Duration::from_millis(CF_METRICS_REPORT_PERIOD_MILLIS));
+        let (sender, mut recv) = tokio::sync::oneshot::channel();
+        tokio::task::spawn(async move {
+            let mut interval =
+                tokio::time::interval(Duration::from_millis(CF_METRICS_REPORT_PERIOD_MILLIS));
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let db = db.clone();
+                        let cf = cf.clone();
+                        let db_metrics = db_metrics.clone();
+                        if let Err(e) = tokio::task::spawn_blocking(move || {
+                            Self::report_metrics(&db, &cf, &db_metrics);
+                        }).await {
+                            error!("Failed to log metrics with error: {}", e);
+                        }
+                    }
+                    _ = &mut recv => break,
+                }
             }
-            info!(
-                "Stopping the column family metric reporting task for DBMap: {}",
-                &cf
-            );
+            info!("Returning the cf metric logging task for DBMap: {}", &cf);
         });
         DBMap {
             rocksdb: db_cloned,
@@ -152,23 +151,8 @@ impl<K, V> DBMap<K, V> {
             db_metrics: db_metrics_cloned,
             read_sample_interval: SamplingInterval::default(),
             write_sample_interval: SamplingInterval::default(),
-            metric_reporter: Arc::new(Mutex::new(Some(metric_reporter))),
-            exit_signal: exit_cloned,
+            _metrics_task_cancel_handle: Arc::new(sender),
         }
-    }
-
-    pub async fn stop(&self) -> Result<(), TypedStoreError> {
-        let mut locked = self.metric_reporter.lock().await;
-        if locked.is_none() {
-            // Already stopped
-            return Ok(());
-        }
-        self.exit_signal.store(true, Ordering::SeqCst);
-        locked
-            .take()
-            .expect("Metric runner was never started")
-            .join()
-            .map_err(|_| TypedStoreError::MetricsReporting)
     }
 
     /// Opens a database from a path, with specific options and an optional column family.
@@ -237,7 +221,7 @@ impl<K, V> DBMap<K, V> {
     }
 
     fn get_int_property(
-        rocksdb: &Arc<rocksdb::DBWithThreadMode<MultiThreaded>>,
+        rocksdb: &rocksdb::DBWithThreadMode<MultiThreaded>,
         cf: &impl AsColumnFamilyRef,
         property_name: &'static std::ffi::CStr,
     ) -> Result<i64, TypedStoreError> {

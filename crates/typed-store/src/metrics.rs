@@ -342,6 +342,13 @@ impl DBMetrics {
         }
     }
     pub fn make_db_metrics(registry: &Registry) -> &'static Arc<DBMetrics> {
+        // TODO: Remove static because this basically means we can
+        // only ever initialize db metrics once with a registry whereas
+        // in the code we might be trying to initialize it with different
+        // registries. The problem is underlying metrics cannot be re-initialized
+        // or prometheus complains. We essentially need metrics per column family
+        // but that might cause an explosion of metrics and hence a better way
+        // to do this is desired
         static ONCE: OnceCell<Arc<DBMetrics>> = OnceCell::new();
         ONCE.get_or_init(|| Arc::new(DBMetrics::new(registry)))
     }
