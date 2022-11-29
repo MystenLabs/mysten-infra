@@ -1,3 +1,5 @@
+# Mysten-infra development now occurs at https://github.com/MystenLabs/sui/crates/
+
 # mysten-infra
 
 ![Build](https://github.com/mystenlabs/mysten-infra/actions/workflows/rust.yml/badge.svg)
